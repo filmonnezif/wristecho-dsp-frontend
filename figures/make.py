@@ -42,19 +42,19 @@ def pareto(r):
         pts = sorted(pts, key=lambda p: p["duty"])
         ax.plot([100 * p["duty"] for p in pts], [100 * p["recall"] for p in pts], marker="o", ms=2, lw=1,
                 color=COL[k], label=NAME[k], ls="--" if k == "F3 v1" else "-")
-    for k in ("F0", "F0+A", "F2@1%", "F3@1%", "F4@1%"):
+    for k in ("F0", "F0+A", "F2@5%", "F3@5%", "F4@5%"):
         f = r["frontends"].get(k)
         if f:
             ax.plot(100 * f["duty_events"], 100 * f["recall"], "*" if k.startswith("F4") else "s",
                     ms=9 if k.startswith("F4") else 5, color=COL[base(k)], mec="k", mew=0.5, zorder=5,
-                    label=NAME[k] if k in ("F0", "F0+A") else ("F4 proposed (1 % budget)" if k.startswith("F4") else None))
+                    label=NAME[k] if k in ("F0", "F0+A") else ("F4 proposed (5 % budget)" if k.startswith("F4") else None))
     ax.set(xlabel="classifier duty on event streams (%)", ylabel="recall, all targets (%)", ylim=(0, None))
     ax.legend(fontsize=5.5, loc="lower right")
     save(fig, "fig_pareto")
 
 
 def idle_duty(r):
-    keys = [k for k in ("F2@1%", "F3 v1@1%", "F3@1%") if k in r["frontends"]]
+    keys = [k for k in ("F2@5%", "F3@5%") if k in r["frontends"]]
     fig, ax = plt.subplots(figsize=(3.4, 2.2))
     w = 0.8 / len(keys)
     for i, k in enumerate(keys):
