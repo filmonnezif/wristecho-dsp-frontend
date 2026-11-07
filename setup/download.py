@@ -71,7 +71,7 @@ def main():
         list(ex.map(demand, C.TUNE_ENVS + C.TEST_ENVS))
     clips = json.load(open(os.path.join(C.ROOT, "data", "cliplist.json")))
     clips = [c for c in clips if c["src"] == "fsd"]
-    with ThreadPoolExecutor(4) as ex:
+    with ThreadPoolExecutor(8) as ex:  # backoff in fetch() handles rate limiting
         list(ex.map(fsd, clips))
     print(f"FSD50K {len(clips)} clips", flush=True)
 
