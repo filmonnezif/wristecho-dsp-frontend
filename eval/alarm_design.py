@@ -42,8 +42,9 @@ def characterize(x):
     if tonal.sum() < 10:
         return dict(f0=None, tonal_share=float(tonal.mean()), pattern="not tonal")
     f0 = float(np.median(f[band][spec[tonal][:, band].argmax(1)]))
-    e, sq, total, loud = frontend.probe_energies(x, FREQS)
-    on = frontend.tone_on(e, sq, total, loud, FREQS, max(f0 - 300, WIDE[0]), min(f0 + 300, WIDE[1]), 0.15)
+    local = np.arange(max(f0 - 300, 100), f0 + 301, C.PROBE_STEP)  # probes around the clip's own pitch
+    e, sq, total, loud = frontend.probe_energies(x, local)
+    on = frontend.tone_on(e, sq, total, loud, local, local[0], local[-1], 0.15)
     pulses, _ = frontend._pulses(on)
     dur = [b - a for a, b in pulses]
     gaps = [pulses[k + 1][0] - pulses[k][1] for k in range(len(pulses) - 1)]
