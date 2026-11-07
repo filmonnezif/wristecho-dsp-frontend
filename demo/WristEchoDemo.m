@@ -206,6 +206,7 @@ if ~P.dsp, dspT = []; end
 
 R.alerts = alertRule(R.tw, R.awake, R.catScore, vs, dspT, P.veto, P.thr, R.cats);
 F0 = alertRule(R.tw, true(1, nw), R.catScore, vs, [], false, P.thr, R.cats);
+R.f0 = F0;
 logTxt = "This system:" + newline;
 for k = 1:size(R.alerts, 1)
     logTxt = logTxt + sprintf("  %.1f s  %s\n", R.alerts{k, 1}, R.alerts{k, 2});
@@ -305,8 +306,10 @@ for i = 1:numel(items)
             [x, ~] = makeScene(items{i}, snr, fs);
         end
         R = frontEnd(x, fs, P, net, classes);
-        fprintf('%-46s %3d dB | saved %3.0f%% | system: %s | always-on: %s\n', items{i}(1:min(end, 46)), snr, ...
-            100 * (1 - mean(R.awake)), strjoin(string(R.alerts(:, 2)), ', '), extractAfter(R.log, "veto):"));
+        [~, nm] = fileparts(items{i});
+        fprintf('%-28s %3d dB | saved %3.0f%% | system: %-32s | always-on: %s\n', nm(1:min(end, 28)), snr, ...
+            100 * (1 - mean(R.awake)), strjoin(erase(string(R.alerts(:, 2)), [" (YAMNet)", " (DSP)"]) + ...
+            string(cellfun(@(c) {''}, R.alerts(:, 2))), ','), strjoin(erase(string(R.f0(:, 2)), " (YAMNet)"), ','));
     end
 end
 end
