@@ -28,7 +28,7 @@ uilabel(c, 'Text', 'Sound', 'FontWeight', 'bold');
 names = demoSounds();
 ddSound = uidropdown(c, 'Items', names, 'Value', names{2});
 uilabel(c, 'Text', 'Room noise (SNR of the sound, dB)');
-slSnr = uislider(c, 'Limits', [-5 30], 'Value', 10, 'MajorTicks', -5:5:30);
+slSnr = uislider(c, 'Limits', [-5 40], 'Value', 10, 'MajorTicks', -5:5:40);
 cbGate = uicheckbox(c, 'Text', 'Wake-up gate on (off = YAMNet on every window)', 'Value', true);
 uilabel(c, 'Text', 'Gate threshold \Delta (dB above the noise floor)', 'Interpreter', 'tex');
 slDelta = uislider(c, 'Limits', [5 30], 'Value', P.delta, 'MajorTicks', 5:5:30);
