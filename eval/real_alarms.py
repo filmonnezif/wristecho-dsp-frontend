@@ -36,8 +36,9 @@ QUERIES = {  # group: (should raise a fire alarm?, queries)
     "fire alarm": (True, ["fire alarm"]),
     "look-alike": (False, ["microwave beep", "oven timer beep", "reversing beeper", "alarm clock beep"]),
 }
-PER_QUERY = 30
+PER_QUERY = {"smoke alarm": 60, "fire alarm": 30, "look-alike": 15}
 EXCLUDE_WORDS = ("battery", "chirp", "test button", "music", "song", "remix")
+POSITIVE_WORDS = ("smoke", "alarm", "detector")  # a positive's name must say what it is
 MAX_S, SNRS = 30.0, [None, 10, 0]
 
 
@@ -46,7 +47,7 @@ def search():
     seen, out = set(), []
     for group, (fire, queries) in QUERIES.items():
         for q in queries:
-            params = dict(query=q, filter="duration:[3 TO 180]", sort="score", page_size=PER_QUERY * 2,
+            params = dict(query=q, filter="duration:[3 TO 180]", sort="score", page_size=150,
                           fields="id,name,tags,license,username,duration,previews,description")
             req = urllib.request.Request("https://freesound.org/apiv2/search/text/?" + urllib.parse.urlencode(params),
                                          headers={"Authorization": f"Token {key}"})  # key in a header, not the URL
@@ -54,13 +55,15 @@ def search():
             n = 0
             for r in res:
                 text = (r["name"] + " " + " ".join(r["tags"]) + " " + r.get("description", "")).lower()
-                if r["id"] in seen or any(w in text for w in EXCLUDE_WORDS):
+                if r["id"] in seen or any(w in text for w in EXCLUDE_WORDS) or "Sampling" in r["license"]:
+                    continue
+                if fire and not any(w in r["name"].lower() for w in POSITIVE_WORDS):
                     continue
                 seen.add(r["id"])
                 out.append(dict(id=r["id"], group=group, query=q, fire=fire, name=r["name"], user=r["username"],
                                 license=r["license"], duration=r["duration"], preview=r["previews"]["preview-hq-mp3"]))
                 n += 1
-                if n >= PER_QUERY:
+                if n >= PER_QUERY[group]:
                     break
     json.dump(out, open(MANIFEST, "w"), indent=1)
     print(f"  {len(out)} clips -> {MANIFEST}")
