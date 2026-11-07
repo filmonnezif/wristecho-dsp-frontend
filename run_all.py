@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from eval import evaluate, extract, stress  # noqa: E402
 from figures import make  # noqa: E402
+from paper import make_tables as tables  # noqa: E402
 from setup import download  # noqa: E402
 
 
@@ -32,3 +33,4 @@ if __name__ == "__main__":
     step("evaluate", evaluate.main)
     step("stress", stress.main)
     step("figures", make.main)
+    step("tables", tables.main)
