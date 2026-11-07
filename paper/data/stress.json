@@ -1,0 +1,82 @@
+{
+ "T-3 piezo 3.1 kHz (in spec)": {
+  "expected_fire": true,
+  "yamnet": 0.75,
+  "t3_loose": 0.85,
+  "t3_strict": 0.85,
+  "t3_confirmed": 0.85,
+  "dsp_v4": 0.85
+ },
+ "T-3 520 Hz square (in spec)": {
+  "expected_fire": true,
+  "yamnet": 0.0,
+  "t3_loose": 0.9,
+  "t3_strict": 0.9,
+  "t3_confirmed": 0.85,
+  "dsp_v4": 0.9
+ },
+ "T-3 piezo 2.6 kHz": {
+  "expected_fire": true,
+  "yamnet": 0.7,
+  "t3_loose": 0.5,
+  "t3_strict": 0.5,
+  "t3_confirmed": 0.5,
+  "dsp_v4": 0.5
+ },
+ "T-3 piezo 4.0 kHz": {
+  "expected_fire": true,
+  "yamnet": 0.65,
+  "t3_loose": 0.0,
+  "t3_strict": 0.0,
+  "t3_confirmed": 0.0,
+  "dsp_v4": 0.0
+ },
+ "T-3 timing x0.7": {
+  "expected_fire": true,
+  "yamnet": 0.9,
+  "t3_loose": 0.35,
+  "t3_strict": 0.35,
+  "t3_confirmed": 0.0,
+  "dsp_v4": 0.35
+ },
+ "T-3 timing x1.5": {
+  "expected_fire": true,
+  "yamnet": 0.7,
+  "t3_loose": 0.4,
+  "t3_strict": 0.35,
+  "t3_confirmed": 0.0,
+  "dsp_v4": 0.3
+ },
+ "T-3 reverb RT60 1.5 s": {
+  "expected_fire": true,
+  "yamnet": 0.6,
+  "t3_loose": 0.75,
+  "t3_strict": 0.75,
+  "t3_confirmed": 0.7,
+  "dsp_v4": 0.7
+ },
+ "T-4 CO alarm 3.1 kHz": {
+  "expected_fire": false,
+  "yamnet": 0.5,
+  "t3_loose": 0.0,
+  "t3_strict": 0.0,
+  "t3_confirmed": 0.0,
+  "dsp_v4": 0.0
+ },
+ "1 Hz beeper 3.1 kHz": {
+  "expected_fire": false,
+  "yamnet": 0.8,
+  "t3_loose": 0.85,
+  "t3_strict": 0.0,
+  "t3_confirmed": 0.0,
+  "dsp_v4": 0.85
+ },
+ "triple beep 2.8 kHz (once)": {
+  "expected_fire": false,
+  "yamnet": 0.15,
+  "t3_loose": 0.0,
+  "t3_strict": 0.0,
+  "t3_confirmed": 0.0,
+  "dsp_v4": 0.0
+ }
+}

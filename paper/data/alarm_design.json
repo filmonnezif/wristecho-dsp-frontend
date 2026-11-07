@@ -1,0 +1,1091 @@
+{
+ "chosen": {
+  "lo": 2800,
+  "hi": 3600,
+  "ratio": 0.15,
+  "rule": "t3"
+ },
+ "chosen_design": {
+  "cfg": {
+   "lo": 2800,
+   "hi": 3600,
+   "ratio": 0.15,
+   "rule": "t3"
+  },
+  "recall": 0.25,
+  "fa": 0.0,
+  "probes": 17
+ },
+ "v3_design": {
+  "cfg": {
+   "lo": 2800,
+   "hi": 3600,
+   "ratio": 0.25,
+   "rule": "t3_strict"
+  },
+  "recall": 0.17708333333333334,
+  "fa": 0.0,
+  "probes": 17
+ },
+ "n_design_alarms": 32,
+ "n_design_lookalikes": 43,
+ "table": [
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.15,
+    "rule": "t3_strict"
+   },
+   "recall": 0.1875,
+   "fa": 0.0,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.15,
+    "rule": "t3"
+   },
+   "recall": 0.25,
+   "fa": 0.0,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.15,
+    "rule": "periodic4"
+   },
+   "recall": 0.08333333333333333,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.15,
+    "rule": "periodic6"
+   },
+   "recall": 0.052083333333333336,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.15,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.2708333333333333,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.15,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.23958333333333334,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.25,
+    "rule": "t3_strict"
+   },
+   "recall": 0.17708333333333334,
+   "fa": 0.0,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.25,
+    "rule": "t3"
+   },
+   "recall": 0.22916666666666666,
+   "fa": 0.0,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.25,
+    "rule": "periodic4"
+   },
+   "recall": 0.08333333333333333,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.25,
+    "rule": "periodic6"
+   },
+   "recall": 0.020833333333333332,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.25,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.2604166666666667,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.25,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.19791666666666666,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.35,
+    "rule": "t3_strict"
+   },
+   "recall": 0.125,
+   "fa": 0.0,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.35,
+    "rule": "t3"
+   },
+   "recall": 0.17708333333333334,
+   "fa": 0.0,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.35,
+    "rule": "periodic4"
+   },
+   "recall": 0.052083333333333336,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.35,
+    "rule": "periodic6"
+   },
+   "recall": 0.010416666666666666,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.35,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.17708333333333334,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2800,
+    "hi": 3600,
+    "ratio": 0.35,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.13541666666666666,
+   "fa": 0.015503875968992248,
+   "probes": 17
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.15,
+    "rule": "t3_strict"
+   },
+   "recall": 0.1875,
+   "fa": 0.0,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.15,
+    "rule": "t3"
+   },
+   "recall": 0.25,
+   "fa": 0.0,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.15,
+    "rule": "periodic4"
+   },
+   "recall": 0.14583333333333334,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.15,
+    "rule": "periodic6"
+   },
+   "recall": 0.11458333333333333,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.15,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.3333333333333333,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.15,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.3020833333333333,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.25,
+    "rule": "t3_strict"
+   },
+   "recall": 0.17708333333333334,
+   "fa": 0.0,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.25,
+    "rule": "t3"
+   },
+   "recall": 0.22916666666666666,
+   "fa": 0.0,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.25,
+    "rule": "periodic4"
+   },
+   "recall": 0.125,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.25,
+    "rule": "periodic6"
+   },
+   "recall": 0.0625,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.25,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.3020833333333333,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.25,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.23958333333333334,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.35,
+    "rule": "t3_strict"
+   },
+   "recall": 0.125,
+   "fa": 0.0,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.35,
+    "rule": "t3"
+   },
+   "recall": 0.17708333333333334,
+   "fa": 0.0,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.35,
+    "rule": "periodic4"
+   },
+   "recall": 0.07291666666666667,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.35,
+    "rule": "periodic6"
+   },
+   "recall": 0.0625,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.35,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.19791666666666666,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2500,
+    "hi": 4000,
+    "ratio": 0.35,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.1875,
+   "fa": 0.015503875968992248,
+   "probes": 31
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.15,
+    "rule": "t3_strict"
+   },
+   "recall": 0.1875,
+   "fa": 0.0,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.15,
+    "rule": "t3"
+   },
+   "recall": 0.25,
+   "fa": 0.08527131782945736,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.15,
+    "rule": "periodic4"
+   },
+   "recall": 0.08333333333333333,
+   "fa": 0.10852713178294573,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.15,
+    "rule": "periodic6"
+   },
+   "recall": 0.052083333333333336,
+   "fa": 0.10852713178294573,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.15,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.2708333333333333,
+   "fa": 0.10852713178294573,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.15,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.23958333333333334,
+   "fa": 0.10852713178294573,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.25,
+    "rule": "t3_strict"
+   },
+   "recall": 0.17708333333333334,
+   "fa": 0.0,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.25,
+    "rule": "t3"
+   },
+   "recall": 0.22916666666666666,
+   "fa": 0.06201550387596899,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.25,
+    "rule": "periodic4"
+   },
+   "recall": 0.0625,
+   "fa": 0.07751937984496124,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.25,
+    "rule": "periodic6"
+   },
+   "recall": 0.010416666666666666,
+   "fa": 0.07751937984496124,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.25,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.23958333333333334,
+   "fa": 0.07751937984496124,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.25,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.1875,
+   "fa": 0.07751937984496124,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.35,
+    "rule": "t3_strict"
+   },
+   "recall": 0.125,
+   "fa": 0.0,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.35,
+    "rule": "t3"
+   },
+   "recall": 0.17708333333333334,
+   "fa": 0.046511627906976744,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.35,
+    "rule": "periodic4"
+   },
+   "recall": 0.020833333333333332,
+   "fa": 0.06201550387596899,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.35,
+    "rule": "periodic6"
+   },
+   "recall": 0.010416666666666666,
+   "fa": 0.05426356589147287,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.35,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.14583333333333334,
+   "fa": 0.06201550387596899,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2200,
+    "hi": 4500,
+    "ratio": 0.35,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.13541666666666666,
+   "fa": 0.05426356589147287,
+   "probes": 47
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.15,
+    "rule": "t3_strict"
+   },
+   "recall": 0.1875,
+   "fa": 0.0,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.15,
+    "rule": "t3"
+   },
+   "recall": 0.25,
+   "fa": 0.13953488372093023,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.15,
+    "rule": "periodic4"
+   },
+   "recall": 0.08333333333333333,
+   "fa": 0.17054263565891473,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.15,
+    "rule": "periodic6"
+   },
+   "recall": 0.052083333333333336,
+   "fa": 0.13178294573643412,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.15,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.2708333333333333,
+   "fa": 0.17054263565891473,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.15,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.23958333333333334,
+   "fa": 0.13178294573643412,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.25,
+    "rule": "t3_strict"
+   },
+   "recall": 0.17708333333333334,
+   "fa": 0.007751937984496124,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.25,
+    "rule": "t3"
+   },
+   "recall": 0.22916666666666666,
+   "fa": 0.10077519379844961,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.25,
+    "rule": "periodic4"
+   },
+   "recall": 0.0625,
+   "fa": 0.12403100775193798,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.25,
+    "rule": "periodic6"
+   },
+   "recall": 0.010416666666666666,
+   "fa": 0.10852713178294573,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.25,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.23958333333333334,
+   "fa": 0.13178294573643412,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.25,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.1875,
+   "fa": 0.11627906976744186,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.35,
+    "rule": "t3_strict"
+   },
+   "recall": 0.125,
+   "fa": 0.0,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.35,
+    "rule": "t3"
+   },
+   "recall": 0.17708333333333334,
+   "fa": 0.08527131782945736,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.35,
+    "rule": "periodic4"
+   },
+   "recall": 0.020833333333333332,
+   "fa": 0.10077519379844961,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.35,
+    "rule": "periodic6"
+   },
+   "recall": 0.010416666666666666,
+   "fa": 0.09302325581395349,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.35,
+    "rule": "t3_strict|periodic4"
+   },
+   "recall": 0.14583333333333334,
+   "fa": 0.10077519379844961,
+   "probes": 61
+  },
+  {
+   "cfg": {
+    "lo": 2000,
+    "hi": 5000,
+    "ratio": 0.35,
+    "rule": "t3_strict|periodic6"
+   },
+   "recall": 0.13541666666666666,
+   "fa": 0.09302325581395349,
+   "probes": 61
+  }
+ ],
+ "characterization": [
+  {
+   "f0": 3000.0,
+   "tonal_share": 0.18975552968568102,
+   "pattern": "continuous tone",
+   "n_pulses": 3,
+   "beep_s": 4.0200000000000005,
+   "gap_s": 0.24999999999999956,
+   "id": 155006,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": 3515.625,
+   "tonal_share": 0.09378407851690294,
+   "pattern": "T-3",
+   "n_pulses": 10,
+   "beep_s": 0.5100000000000002,
+   "gap_s": 0.28000000000000025,
+   "id": 557484,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": 3390.625,
+   "tonal_share": 0.35591506572295245,
+   "pattern": "T-3",
+   "n_pulses": 15,
+   "beep_s": 0.4800000000000004,
+   "gap_s": 0.4800000000000004,
+   "id": 530094,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": 3265.625,
+   "tonal_share": 0.5202821869488536,
+   "pattern": "T-3",
+   "n_pulses": 9,
+   "beep_s": 0.5399999999999991,
+   "gap_s": 0.5200000000000002,
+   "id": 856775,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": 3265.625,
+   "tonal_share": 0.5282051282051282,
+   "pattern": "T-3",
+   "n_pulses": 9,
+   "beep_s": 0.54,
+   "gap_s": 0.5199999999999998,
+   "id": 856776,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 168585,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 168586,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 843299,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": 3484.375,
+   "tonal_share": 0.12,
+   "pattern": "other",
+   "n_pulses": 3,
+   "beep_s": 0.3400000000000001,
+   "gap_s": 0.57,
+   "id": 136482,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 824778,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 834335,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 874698,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 874697,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 577314,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": 1031.25,
+   "tonal_share": 0.5760773966578716,
+   "pattern": "T-3",
+   "n_pulses": 15,
+   "beep_s": 0.4399999999999995,
+   "gap_s": 0.4800000000000003,
+   "id": 460310,
+   "group": "smoke alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 255180,
+   "group": "fire alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 255181,
+   "group": "fire alarm"
+  },
+  {
+   "f0": 1234.375,
+   "tonal_share": 0.26171428571428573,
+   "pattern": "other",
+   "n_pulses": 24,
+   "beep_s": 0.2500000000000009,
+   "gap_s": 0.26000000000000156,
+   "id": 383254,
+   "group": "fire alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.002,
+   "pattern": "not tonal",
+   "id": 623746,
+   "group": "fire alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 509251,
+   "group": "fire alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 613650,
+   "group": "fire alarm"
+  },
+  {
+   "f0": 2625.0,
+   "tonal_share": 0.5456521739130434,
+   "pattern": "continuous tone",
+   "n_pulses": 1,
+   "beep_s": 6.42,
+   "gap_s": null,
+   "id": 792484,
+   "group": "fire alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.019157088122605363,
+   "pattern": "not tonal",
+   "id": 22457,
+   "group": "fire alarm"
+  },
+  {
+   "f0": 3078.125,
+   "tonal_share": 0.25990491283676703,
+   "pattern": "T-3",
+   "n_pulses": 9,
+   "beep_s": 0.4399999999999995,
+   "gap_s": 0.38000000000000034,
+   "id": 325367,
+   "group": "fire alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0006666666666666666,
+   "pattern": "not tonal",
+   "id": 202053,
+   "group": "fire alarm"
+  },
+  {
+   "f0": 2640.625,
+   "tonal_share": 0.8133333333333334,
+   "pattern": "continuous tone",
+   "n_pulses": 1,
+   "beep_s": 29.94,
+   "gap_s": null,
+   "id": 792642,
+   "group": "fire alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 210513,
+   "group": "fire alarm"
+  },
+  {
+   "f0": 1109.375,
+   "tonal_share": 0.05226480836236934,
+   "pattern": "continuous tone",
+   "n_pulses": 23,
+   "beep_s": 0.10000000000000142,
+   "gap_s": 0.7800000000000007,
+   "id": 82797,
+   "group": "fire alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 609721,
+   "group": "fire alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 678345,
+   "group": "fire alarm"
+  },
+  {
+   "f0": null,
+   "tonal_share": 0.0,
+   "pattern": "not tonal",
+   "id": 783829,
+   "group": "fire alarm"
+  },
+  {
+   "f0": 1468.75,
+   "tonal_share": 0.013333333333333334,
+   "pattern": "periodic",
+   "n_pulses": 11,
+   "beep_s": 0.3600000000000001,
+   "gap_s": 1.1400000000000003,
+   "id": 531855,
+   "group": "fire alarm"
+  }
+ ]
+}

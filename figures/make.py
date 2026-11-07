@@ -126,6 +126,44 @@ def filters():
     save(fig, "fig_filters")
 
 
+def alarm_character():
+    """Real alarms (design half): dominant pitch vs. the Goertzel probe band, and their patterns."""
+    p = os.path.join(C.RESULTS, "alarm_design.json")
+    if not os.path.exists(p):
+        return
+    ch = json.load(open(p))["characterization"]
+    f0 = [c["f0"] / 1000 for c in ch if c["f0"]]
+    fig, axs = plt.subplots(2, 1, figsize=(3.4, 3.2), gridspec_kw=dict(height_ratios=[1.3, 1]))
+    axs[0].axvspan(C.ALARM_V3["lo"] / 1000, C.ALARM_V3["hi"] / 1000, color=COL["F4"], alpha=0.15, label="Goertzel probes")
+    axs[0].hist(f0, bins=np.arange(0.75, 4.01, 0.25), color=COL["F0"], edgecolor="w")
+    axs[0].set(xlabel="dominant frequency of tonal frames (kHz)", ylabel="real alarms")
+    axs[0].legend(fontsize=6)
+    order = ["T-3", "periodic", "continuous tone", "other", "not tonal"]
+    counts = [sum(c["pattern"] == o for c in ch) for o in order]
+    axs[1].barh(order[::-1], counts[::-1], color=[COL["F0"]] * 4 + [COL["F4"]])  # T-3 (top) is what the detector encodes
+    axs[1].set(xlabel=f"real alarms (n = {len(ch)})")
+    save(fig, "fig_alarm_character")
+
+
+def real_scenes():
+    """Naturally recorded audio: gate wake-up per DESED event class, classifier duty per SINS activity."""
+    p = os.path.join(C.RESULTS, "real_scenes.json")
+    if not os.path.exists(p):
+        return
+    r = json.load(open(p))
+    fig, axs = plt.subplots(1, 2, figsize=(7, 2.4))
+    w = sorted(r["desed"]["wake_recall"].items(), key=lambda kv: kv[1]["rate"])
+    axs[0].barh([k.replace("_", " ").replace(" toothbrush", "") for k, _ in w], [100 * v["rate"] for _, v in w], color=COL["F3"])
+    axs[0].set(xlim=(80, 100), xlabel="gate awake during labelled event (%)", title=f"DESED, {r['desed']['clips']} real clips")
+    a = sorted(r["sins"].items(), key=lambda kv: kv[1]["duty"])
+    axs[1].barh([k.replace("_", " ") for k, _ in a], [100 * v["duty"] for _, v in a], color=COL["F4"])
+    axs[1].axvline(100 * r["sins_all"]["duty"], color="k", ls="--", lw=0.7)
+    axs[1].set(xlim=(0, 100), xlabel="classifier duty (%)", title=f"SINS, {r['sins_all']['hours']:.1f} h of home life")
+    for ax in axs:
+        ax.tick_params(axis="y", labelsize=6)
+    save(fig, "fig_real_scenes")
+
+
 def example(r):
     fe = r["frontends"].get("F4@1%", {}).get("frontend")
     spec = next(s for s in streams.specs() if s["split"] == "test" and s["env"] == "DLIVING" and s["kind"] == "events")
@@ -161,6 +199,8 @@ def main():
     idle_duty(r)
     recall_snr(r)
     stress()
+    alarm_character()
+    real_scenes()
     example(r)
     print("  figures ->", C.FIGURES)
 

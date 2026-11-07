@@ -73,6 +73,6 @@ classifier/  YAMNet runner and the alert decision rule
 eval/        extraction, calibration, metrics, statistics
 figures/     paper figures
 tests/       unit tests for the DSP blocks
-paper/       IEEE paper
+paper/       IEEE paper (main.tex), its figures (fig/) and a frozen snapshot of the results it reports (data/)
 demo/        live MATLAB demo (coming)
 ```
