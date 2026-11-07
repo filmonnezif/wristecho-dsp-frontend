@@ -1,0 +1,31 @@
+% System block diagram (included by main.tex)
+\begin{tikzpicture}[font=\scriptsize, >=Stealth, node distance=3mm and 4mm,
+  blk/.style={draw, rounded corners=1pt, align=center, minimum height=6mm, inner sep=2pt, fill=white},
+  dsp/.style={blk, fill=teal!10}, nn/.style={blk, fill=blue!8}, dec/.style={blk, fill=orange!12}]
+\node[blk] (mic) {mic\\16\,kHz};
+\node[blk, right=of mic] (buf) {ring buffer\\0.975\,s};
+% gate path
+\node[dsp, above right=2mm and 4mm of buf] (hpf) {HPF\\Butterworth};
+\node[dsp, right=of hpf] (fft) {20\,ms FFT\\16 bands};
+\node[dsp, right=of fft] (floor) {noise floors\\fast + slow};
+\node[dsp, right=of floor] (gate) {rise $>\Delta$?\\hangover $H$};
+% alarm and knock paths
+\node[dsp, below right=2mm and 4mm of buf] (goe) {Goertzel bank\\2.8--3.6\,kHz, 520\,Hz};
+\node[dsp, right=of goe] (t3) {tone track\\T-3 pattern};
+\node[dsp, below=5mm of goe.south -| fft] (knock) {impulse rhythm\\(knocks)};
+% classifier and decision
+\node[nn, right=6mm of gate] (yam) {YAMNet\\(only when awake)};
+\node[dec, below=6mm of yam] (rule) {alert rule\\$N$ windows, cooldown,\\siren veto, agreement};
+\node[dec, right=of rule] (out) {alert\\vibration + screen};
+\draw[->] (mic) -- (buf);
+\draw[->] (buf.north) |- (hpf.west);
+\draw[->] (hpf) -- (fft); \draw[->] (fft) -- (floor); \draw[->] (floor) -- (gate);
+\draw[->] (gate) -- node[below]{wake} (yam);
+\draw[->] (buf.south) |- (goe.west);
+\draw[->] (goe) -- (t3);
+\draw[->] (fft.south) -- (knock.north);
+\draw[->] (yam) -- node[right]{scores} (rule);
+\draw[->] (t3.east) -- (rule.west);
+\draw[->] (knock.east) -| (rule.south);
+\draw[->] (rule) -- (out);
+\end{tikzpicture}

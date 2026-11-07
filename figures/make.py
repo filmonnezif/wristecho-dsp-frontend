@@ -21,11 +21,13 @@ plt.rcParams.update({"font.size": 8, "figure.dpi": 200, "axes.grid": True, "grid
 COL = {"F0": "#555555", "F0+A": "#999999", "F1": "#E69F00", "F2": "#56B4E9", "F3 v1": "#9AD9C4", "F3": "#009E73",
        "F4": "#D55E00"}
 NAME = {"F0": "F0 always on", "F0+A": "F0 + alarm DSP", "F1": "F1 every k-th", "F2": "F2 fixed gate",
-        "F3 v1": "F3 adaptive gate (v1)", "F3": "F3 adaptive gate", "F4": "F4 proposed"}
+        "F3 v1": "F3 one floor", "F3": "F3 two floors", "F4": "F4 proposed"}
+PROPOSED = "F4 knock@5%"  # gate + alarm DSP + knock DSP + siren veto, at the 5 % budget
 
 
 def base(key):
-    return key.split("@")[0].replace(" strict", "")
+    k = key.split("@")[0]
+    return k if k in COL else k.split()[0]
 
 
 def save(fig, name):
@@ -42,7 +44,7 @@ def pareto(r):
         pts = sorted(pts, key=lambda p: p["duty"])
         ax.plot([100 * p["duty"] for p in pts], [100 * p["recall"] for p in pts], marker="o", ms=2, lw=1,
                 color=COL[k], label=NAME[k], ls="--" if k == "F3 v1" else "-")
-    for k in ("F0", "F0+A", "F2@5%", "F3@5%", "F4@5%"):
+    for k in ("F0", "F0+A", "F2@5%", "F3@5%", PROPOSED):
         f = r["frontends"].get(k)
         if f:
             ax.plot(100 * f["duty_events"], 100 * f["recall"], "*" if k.startswith("F4") else "s",
@@ -70,11 +72,11 @@ def idle_duty(r):
 def recall_snr(r):
     fig, axs = plt.subplots(1, 3, figsize=(7, 2.2), sharey=True)
     for ax, cat in zip(axs, C.ORDER):
-        for k in ("F0", "F3@1%", "F4@1%"):
+        for k in ("F0", "F3@5%", PROPOSED):
             if k in r["frontends"]:
                 ys = [r["frontends"][k]["by_cat_snr"][cat][str(v)] for v in C.SNRS_DB]
                 ax.plot(C.SNRS_DB, [100 * y if y is not None else np.nan for y in ys], marker="o", ms=3,
-                        color=COL[base(k)], label=NAME[base(k)], ls="--" if k == "F3@1%" else "-")
+                        color=COL[base(k)], label=NAME[base(k)], ls="--" if k == "F3@5%" else "-")
         ax.set(title=cat.replace("_", " ").lower(), xlabel="SNR (dB)", ylim=(0, 102))
     axs[0].set_ylabel("recall (%)")
     axs[0].legend(fontsize=6)
