@@ -1,5 +1,5 @@
 """Step 1 (the slow part): per stream, render the audio, run YAMNet on EVERY window once, compute
-the gate features and the DSP alarm detections, and cache them. Every front end is evaluated
+the per-frame band powers (input of every gate variant) and the DSP alarm detections, and cache them. Every front end is evaluated
 afterwards as a mask over these cached scores, which is exact because YAMNet scores each window
 independently: skipping a window does not change any other window's score.
 """
@@ -19,30 +19,28 @@ from dsp import frontend  # noqa: E402
 
 
 def job(spec):
-    path = os.path.join(C.CACHE, spec["id"] + ".npz")
+    path = os.path.join(C.CACHE, "v2", spec["id"] + ".npz")
     if os.path.exists(path):
         return path
     x, events = streams.render(spec)
     n = yamnet.n_windows(len(x))
-    t0 = time.process_time()
-    cat = yamnet.category_scores(yamnet.window_scores(x))
-    t_yam = (time.process_time() - t0) / n
-    t0 = time.process_time()
-    level, novelty = frontend.gate_features(x)
-    lvl_w, nov_w = frontend.per_window(level, n), frontend.per_window(novelty, n)
-    t_gate = (time.process_time() - t0) / n
-    t0 = time.process_time()
-    alarms = frontend.alarm_times(x)
-    t_alarm = (time.process_time() - t0) / n
-    np.savez_compressed(path + ".tmp.npz", cat=cat.astype(np.float16), level=lvl_w, novelty=nov_w,
-                        alarms=np.array(alarms, np.float32), cost=np.array([t_yam, t_gate, t_alarm]),
+    v1 = os.path.join(C.CACHE, spec["id"] + ".npz")  # first version's cache: same audio, same scores
+    if os.path.exists(v1):
+        cat = np.load(v1)["cat"]
+    else:
+        cat = yamnet.category_scores(yamnet.window_scores(x)).astype(np.float16)
+    level, bands = frontend.band_power(x)
+    on = frontend.tone_track(x)
+    np.savez_compressed(path + ".tmp.npz", cat=cat, level=level.astype(np.float16), bands=bands.astype(np.float16),
+                        n=n, alarms=np.array(frontend.t3_times(on), np.float32),
+                        alarms_strict=np.array(frontend.t3_times(on, strict=True), np.float32),
                         meta=json.dumps(dict(spec, events=events)))
     os.replace(path + ".tmp.npz", path)
     return path
 
 
 def main(limit=None):
-    os.makedirs(C.CACHE, exist_ok=True)
+    os.makedirs(os.path.join(C.CACHE, "v2"), exist_ok=True)
     specs = streams.specs()[:limit]
     t = time.time()
     with Pool(C.WORKERS) as pool:

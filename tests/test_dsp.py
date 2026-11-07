@@ -58,6 +58,25 @@ def test_detect_rule_and_sleeping_windows():
     cat[10:12, j, 0] = 0.9  # two consecutive windows -> one siren
     assert [c for _, c in detect(cat)] == ["SIREN"]
     awake = np.ones(40, bool)
-    awake[11] = False  # sleeping window breaks the run
+    awake[11] = False  # one skipped window: the run continues with the next classified one
+    cat[12, j, 0] = 0.9
+    assert [c for _, c in detect(cat, awake)] == ["SIREN"]
+    awake[12:20] = False  # a long sleep (> HOLD_S) breaks the run
     assert detect(cat, awake) == []
     assert [c for _, c in detect(cat, awake, extra=[(3.0, "FIRE_ALARM")])] == ["FIRE_ALARM"]
+
+
+def test_strict_t3_needs_the_pause():
+    x = 0.1 * synthetic_alarm(0)
+    assert len(frontend.alarm_times(x, strict=True)) >= 1
+    t = np.arange(10 * C.SR) / C.SR  # continuous 1 Hz beeper at 3.1 kHz: no 1.5 s pause
+    beeper = (0.1 * np.sin(2 * np.pi * 3100 * t) * ((t % 1.0) < 0.5)).astype(np.float32)
+    assert frontend.alarm_times(beeper) and not frontend.alarm_times(beeper, strict=True)
+
+
+def test_cfar_centres_background():
+    rng = np.random.default_rng(3)
+    w = rng.normal(12, 2, 200).astype(np.float32)
+    w[150] = 40
+    c = frontend.os_cfar(w)
+    assert abs(np.median(c[40:])) < 1.5 and c[150] > 25

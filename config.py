@@ -54,7 +54,15 @@ NFFT = 512
 HPF_HZ, HPF_ORDER = 100.0, 2  # Butterworth high-pass on the gate path: removes DC, rumble, handling
 N_BANDS, BAND_LO, BAND_HI = 16, 100.0, 7600.0  # log-spaced bands for the noise-floor tracker
 BAND_SMOOTH_S = 0.06  # 1st-order IIR smoothing of band power before tracking (tames FFT-bin fluctuations)
-FLOOR_RISE_DB_S = 3.0  # floor follows a quieter band at once and rises at most 3 dB/s (minimum tracking)
+FLOOR_RISE_DB_S = 3.0
+CFAR_REF_S = 10.0  # OS-CFAR reference: median novelty of the previous 10 s
+# Gate variants compared on the tuning environments; the best one at the 1 % budget is used.
+GATE_VARIANTS = {
+    "v1": dict(smooth_s=0.06, rank=1, cfar=False),  # the first version
+    "smooth2": dict(smooth_s=0.15, rank=2, cfar=False),  # longer smoothing + two bands must rise
+    "v1+cfar": dict(smooth_s=0.06, rank=1, cfar=True),
+    "smooth2+cfar": dict(smooth_s=0.15, rank=2, cfar=True),
+}  # floor follows a quieter band at once and rises at most 3 dB/s (minimum tracking)
 # Goertzel probes, fixed from the alarm literature (not tuned on data): piezo smoke alarms ring at
 # about 3.1 kHz (2.8-3.6 kHz), low-frequency alarms use a 520 Hz square wave (520, 1560, 2600 Hz).
 PIEZO_PROBES = np.arange(2800, 3601, 50)
@@ -63,9 +71,10 @@ SQUARE_PROBES = (520, 1560, 2600)
 # --- Sweeps and calibration ---------------------------------------------------------------------
 DUTY_K = [1, 2, 3, 4, 6, 8]  # F1: classify every k-th window
 FIXED_DBFS = np.arange(-66, -19, 2.0)  # F2: absolute level threshold
-NOVELTY_DB = np.arange(2, 30.1, 1.0)  # F3: dB above the tracked noise floor
-HANGOVER_S = [0, 1, 2, 3, 5]  # keep the classifier awake this long after a trigger
-MISS_BUDGET = 0.01  # at most 1 % of events missed *because the gate slept* (on tuning data)
+NOVELTY_DB = np.arange(0, 30.1, 1.0)  # F3: dB above the floor (or above the CFAR median)
+HANGOVER_S = [0, 1, 2]  # keep the classifier awake this long after a trigger
+BUDGETS = [0.01, 0.03, 0.05]  # max share of F0's detections lost *because the gate slept* (tuning)
+HOLD_S = 2.0  # an N-window run survives skipped windows if classified windows are <= 2 s apart
 BOOTSTRAP = 2000
 
 WORKERS = int(os.environ.get("WORKERS", os.cpu_count() or 2))

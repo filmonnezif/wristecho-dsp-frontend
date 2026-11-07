@@ -18,9 +18,14 @@ from eval import evaluate as E  # noqa: E402
 
 plt.rcParams.update({"font.size": 8, "figure.dpi": 200, "axes.grid": True, "grid.alpha": 0.3,
                      "axes.spines.top": False, "axes.spines.right": False})
-COL = {"F0": "#555555", "F0+A": "#999999", "F1": "#E69F00", "F2": "#56B4E9", "F3": "#009E73", "F4": "#D55E00"}
+COL = {"F0": "#555555", "F0+A": "#999999", "F1": "#E69F00", "F2": "#56B4E9", "F3 v1": "#9AD9C4", "F3": "#009E73",
+       "F4": "#D55E00"}
 NAME = {"F0": "F0 always on", "F0+A": "F0 + alarm DSP", "F1": "F1 every k-th", "F2": "F2 fixed gate",
-        "F3": "F3 adaptive gate", "F4": "F4 proposed"}
+        "F3 v1": "F3 adaptive gate (v1)", "F3": "F3 adaptive gate", "F4": "F4 proposed"}
+
+
+def base(key):
+    return key.split("@")[0].replace(" strict", "")
 
 
 def save(fig, name):
@@ -35,25 +40,29 @@ def pareto(r):
     fig, ax = plt.subplots(figsize=(3.4, 2.6))
     for k, pts in r["pareto_test"].items():
         pts = sorted(pts, key=lambda p: p["duty"])
-        ax.plot([100 * p["duty"] for p in pts], [100 * p["recall"] for p in pts], "-o", ms=2, lw=1, color=COL[k], label=NAME[k])
-    for k, f in r["frontends"].items():
-        ax.plot(100 * f["duty_events"], 100 * f["recall"], "*" if k == "F4" else "s", ms=9 if k == "F4" else 5,
-                color=COL[k], mec="k", mew=0.5, zorder=5, label=None if k in ("F1", "F2", "F3") else NAME[k])
-    ax.set_xlabel("classifier duty on event streams (%)")
-    ax.set_ylabel("recall, all targets (%)")
-    ax.legend(fontsize=6, loc="lower right")
+        ax.plot([100 * p["duty"] for p in pts], [100 * p["recall"] for p in pts], marker="o", ms=2, lw=1,
+                color=COL[k], label=NAME[k], ls="--" if k == "F3 v1" else "-")
+    for k in ("F0", "F0+A", "F2@1%", "F3@1%", "F4@1%"):
+        f = r["frontends"].get(k)
+        if f:
+            ax.plot(100 * f["duty_events"], 100 * f["recall"], "*" if k.startswith("F4") else "s",
+                    ms=9 if k.startswith("F4") else 5, color=COL[base(k)], mec="k", mew=0.5, zorder=5,
+                    label=NAME[k] if k in ("F0", "F0+A") else ("F4 proposed (1 % budget)" if k.startswith("F4") else None))
+    ax.set(xlabel="classifier duty on event streams (%)", ylabel="recall, all targets (%)", ylim=(0, None))
+    ax.legend(fontsize=5.5, loc="lower right")
     save(fig, "fig_pareto")
 
 
 def idle_duty(r):
-    keys = [k for k in ("F1", "F2", "F3") if k in r["frontends"]]
+    keys = [k for k in ("F2@1%", "F3 v1@1%", "F3@1%") if k in r["frontends"]]
     fig, ax = plt.subplots(figsize=(3.4, 2.2))
     w = 0.8 / len(keys)
     for i, k in enumerate(keys):
         d = r["frontends"][k]["duty_idle_by_env"]
-        ax.bar(np.arange(len(C.TEST_ENVS)) + i * w, [100 * d.get(e, np.nan) for e in C.TEST_ENVS], w, color=COL[k], label=NAME[k])
+        ax.bar(np.arange(len(C.TEST_ENVS)) + i * w, [100 * d.get(e, np.nan) for e in C.TEST_ENVS], w,
+               color=COL[base(k)], label=NAME[base(k)])
     ax.set_xticks(np.arange(len(C.TEST_ENVS)) + w * (len(keys) - 1) / 2, C.TEST_ENVS, rotation=30)
-    ax.set_ylabel("classifier duty, background only (%)")
+    ax.set(ylabel="classifier duty,\nbackground only (%)", ylim=(0, 100))
     ax.legend(fontsize=6)
     save(fig, "fig_idle_duty")
 
@@ -61,17 +70,34 @@ def idle_duty(r):
 def recall_snr(r):
     fig, axs = plt.subplots(1, 3, figsize=(7, 2.2), sharey=True)
     for ax, cat in zip(axs, C.ORDER):
-        for k in ("F0", "F3", "F4"):
-            if k not in r["frontends"]:
-                continue
-            f = r["frontends"][k]
-            ys = [f["by_cat_snr"][cat][str(s)] for s in C.SNRS_DB]
-            ax.plot(C.SNRS_DB, [100 * y if y is not None else np.nan for y in ys], "-o", ms=3, color=COL[k], label=NAME[k])
-        ax.set_title(cat.replace("_", " ").lower())
-        ax.set_xlabel("SNR (dB)")
+        for k in ("F0", "F3@1%", "F4@1%"):
+            if k in r["frontends"]:
+                ys = [r["frontends"][k]["by_cat_snr"][cat][str(v)] for v in C.SNRS_DB]
+                ax.plot(C.SNRS_DB, [100 * y if y is not None else np.nan for y in ys], marker="o", ms=3,
+                        color=COL[base(k)], label=NAME[base(k)], ls="--" if k == "F3@1%" else "-")
+        ax.set(title=cat.replace("_", " ").lower(), xlabel="SNR (dB)", ylim=(0, 102))
     axs[0].set_ylabel("recall (%)")
     axs[0].legend(fontsize=6)
     save(fig, "fig_recall_snr")
+
+
+def stress():
+    p = os.path.join(C.RESULTS, "stress.json")
+    if not os.path.exists(p):
+        return
+    r = json.load(open(p))
+    names = list(r)
+    det = [("yamnet", "classifier (F0)", COL["F0"]), ("t3_loose", "T-3", COL["F4"]),
+           ("t3_strict", "T-3 strict", "#F0A27A"), ("t3_confirmed", "T-3 two cycles", "#8C3A12")]
+    fig, ax = plt.subplots(figsize=(7, 2.6))
+    w = 0.8 / len(det)
+    for i, (k, lab, col) in enumerate(det):
+        ax.bar(np.arange(len(names)) + i * w, [100 * r[n][k] for n in names], w, color=col, label=lab)
+    ax.set_xticks(np.arange(len(names)) + 0.3, [n + ("" if r[n]["expected_fire"] else "\n(should not fire)") for n in names],
+                  rotation=35, ha="right", fontsize=6)
+    ax.set(ylabel="fire alarm raised (%)", ylim=(0, 105))
+    ax.legend(fontsize=6, ncol=4, loc="upper right")
+    save(fig, "fig_stress")
 
 
 def filters():
@@ -101,28 +127,29 @@ def filters():
 
 
 def example(r):
-    fe = r["frontends"].get("F4", {}).get("frontend")
+    fe = r["frontends"].get("F4@1%", {}).get("frontend")
     spec = next(s for s in streams.specs() if s["split"] == "test" and s["env"] == "DLIVING" and s["kind"] == "events")
     x, events = streams.render(spec)
-    level, novelty = frontend.gate_features(x)
-    t_fr = np.arange(len(novelty)) * C.FRAME / C.SR
+    level, bands = frontend.band_power(x)
+    n = (len(x) - C.WIN) // C.HOP + 1
     fig, axs = plt.subplots(3, 1, figsize=(7, 3.6), sharex=True, gridspec_kw=dict(height_ratios=[2, 1, 0.5]))
     f, t, S = signal.spectrogram(x, C.SR, nperseg=512, noverlap=256)
-    axs[0].pcolormesh(t, f / 1000, 10 * np.log10(S + 1e-12), shading="auto", cmap="magma", vmin=-110, vmax=-40, rasterized=True)
+    axs[0].pcolormesh(t, f / 1000, 10 * np.log10(S + 1e-12), shading="auto", cmap="magma", vmin=-110, vmax=-40,
+                      rasterized=True)
     axs[0].set_ylabel("kHz")
     for e in events:
         if e["role"] == "target":
             axs[0].axvspan(e["onset"], e["end"], color="w", alpha=0.15)
             axs[0].text(e["onset"], 7.3, f"{e['category'].lower()} {e['snr']:.0f} dB", color="w", fontsize=5)
-    axs[1].plot(t_fr, novelty, lw=0.4, color=COL["F3"])
     if fe:
-        axs[1].axhline(fe[1], color="k", ls="--", lw=0.7)
-        nov_w = frontend.per_window(novelty, (len(x) - C.WIN) // C.HOP + 1)
-        awake = E.hang(nov_w > fe[1], fe[2])
-        tw = (C.WIN + np.arange(len(awake)) * C.HOP) / C.SR
+        stat = frontend.gate_novelty(bands, n, C.GATE_VARIANTS[fe["variant"]])
+        tw = (C.WIN + np.arange(n) * C.HOP) / C.SR
+        axs[1].plot(tw, stat, lw=0.6, color=COL["F3"])
+        axs[1].axhline(fe["thr"], color="k", ls="--", lw=0.7)
+        awake = E.hang(stat > fe["thr"], fe["hang"])
         axs[2].fill_between(tw, 0, awake, step="pre", color=COL["F4"], alpha=0.8)
         axs[2].set_title(f"classifier awake {100 * awake.mean():.0f} % of the time", fontsize=7)
-    axs[1].set_ylabel("novelty (dB)")
+        axs[1].set_ylabel(f"gate statistic\n({fe['variant']}, dB)", fontsize=6)
     axs[2].set(yticks=[], xlabel="time (s)")
     save(fig, "fig_example")
 
@@ -133,6 +160,7 @@ def main():
     pareto(r)
     idle_duty(r)
     recall_snr(r)
+    stress()
     example(r)
     print("  figures ->", C.FIGURES)
 

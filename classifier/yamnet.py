@@ -76,15 +76,24 @@ def category_scores(scores):
 def detect(cat, awake=None, extra=()):
     """The app's rule: a category fires when its score >= threshold (and beats its veto labels)
     in `needed` consecutive classified windows, with a 20 s cooldown; most urgent first.
-    awake: bool per window (None = always); a sleeping window is not classified, so it breaks a run.
+    awake: bool per window (None = always). A sleeping window is not classified; a run of
+    `needed` windows counts classified windows and survives skipped ones while consecutive
+    classified windows are at most HOLD_S apart (so every-k-th-window duty cycling can still meet
+    a 2-window rule; with no skipping this is exactly the app's rule).
     extra: [(time, category)] detections from the DSP alarm detector, merged under the same cooldown.
     Returns [(time s, category)]."""
     times = (C.WIN + np.arange(len(cat)) * C.HOP) / C.SR
-    runs = np.zeros(len(C.ORDER), int)
+    runs = [0] * len(C.ORDER)
     last = {c: -1e9 for c in C.ORDER}
     fired = []
     ex = sorted(extra)
     e = 0
+    last_classified = -1e9
+    thr = np.array([C.CATEGORIES[c]["threshold"] for c in C.ORDER])
+    ok_all = ((cat[:, :, 0] >= thr) & (cat[:, :, 1] < cat[:, :, 0])).tolist()  # per window, per category
+    needed = [C.CATEGORIES[c]["needed"] for c in C.ORDER]
+    times = times.tolist()
+    awake = awake.tolist() if awake is not None else None
     for k, t in enumerate(times):
         while e < len(ex) and ex[e][0] <= t:
             te, ce = ex[e]
@@ -93,14 +102,14 @@ def detect(cat, awake=None, extra=()):
                 fired.append((float(te), ce))
             e += 1
         if awake is not None and not awake[k]:
-            runs[:] = 0
             continue
+        if t - last_classified > C.HOLD_S + 1e-6:
+            runs = [0] * len(C.ORDER)
+        last_classified = t
         winner = None
-        for j, c in enumerate(C.ORDER):
-            best, veto = cat[k, j]
-            ok = best >= C.CATEGORIES[c]["threshold"] and veto < best
+        for j, ok in enumerate(ok_all[k]):
             runs[j] = runs[j] + 1 if ok else 0
-            if winner is None and runs[j] >= C.CATEGORIES[c]["needed"] and t - last[c] >= C.COOLDOWN_S:
+            if winner is None and runs[j] >= needed[j] and t - last[C.ORDER[j]] >= C.COOLDOWN_S:
                 winner = j
         if winner is not None:
             c = C.ORDER[winner]
