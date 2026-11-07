@@ -76,5 +76,6 @@ HANGOVER_S = [0, 1, 2]  # keep the classifier awake this long after a trigger
 BUDGETS = [0.01, 0.03, 0.05]  # max share of F0's detections lost *because the gate slept* (tuning)
 HOLD_S = 2.0  # an N-window run survives skipped windows if classified windows are <= 2 s apart
 BOOTSTRAP = 2000
+THRESHOLD_GRID = np.round(np.arange(0.05, 0.501, 0.025), 3)  # tuned-baseline search (must contain 0.30)
 
 WORKERS = int(os.environ.get("WORKERS", os.cpu_count() or 2))

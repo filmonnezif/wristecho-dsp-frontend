@@ -5,8 +5,10 @@ Front ends
   F1      classifier on every k-th window (naive duty cycling)
   F2      fixed energy gate: wake when the HPF'd level exceeds T dBFS
   F3      adaptive gate: wake when the novelty statistic exceeds Delta (variant chosen on tuning data)
-  F4      F3 + the Goertzel/T-3 alarm detector, which raises fire alarms by itself (proposed)
+  F4      F3 + the Goertzel/T-3 alarm detector (strict: needs the 1.5 s pause), which raises fire
+          alarms by itself (proposed); "loose" = without the pause check
   F0+A    classifier on every window + the alarm detector (ablation: separates the two effects)
+  F0*     classifier on every window with thresholds tuned on the tuning streams (stronger baseline)
 Gates keep the classifier awake for a hangover H after the last trigger.
 
 Calibration uses the tuning environments only. For a budget b, a gate's setting is the one with
@@ -60,7 +62,9 @@ def name(fe):
         return f"F2(T={fe['thr']:g} dBFS, H={fe['hang']} s)"
     if k in ("F3", "F4"):
         return f"{k}({fe['variant']}, D={fe['thr']:g} dB, H={fe['hang']} s{', ' + fe['alarm'] if fe.get('alarm') else ''})"
-    return k + (f"({fe['alarm']})" if fe.get("alarm") else "")
+    parts = ([", ".join(f"{c.lower()} {t:g}" for c, t in fe["thresholds"].items())] if fe.get("thresholds") else []) + \
+        ([f"T-3 {fe['alarm']}"] if fe.get("alarm") else [])
+    return k + ("*" if fe.get("thresholds") else "") + (f"({'; '.join(parts)})" if parts else "")
 
 
 def mask(fe, s):
@@ -79,7 +83,7 @@ def run(fe, streams):
     for s in streams:
         m = mask(fe, s)
         extra = s["alarms"][fe["alarm"]] if fe.get("alarm") else ()
-        res.append((m, detect(s["cat"], m, extra)))
+        res.append((m, detect(s["cat"], m, extra, fe.get("thresholds"))))
     return res
 
 
@@ -87,6 +91,7 @@ def score(streams, res):
     """Per-target hits/latency, false alarms (by category), classifier duty."""
     hits, lat, rows = [], [], []
     fa = {(kind, c): 0 for kind in ("idle", "events") for c in C.ORDER}
+    causes = {}
     windows = awake = 0
     for s, (m, fired) in zip(streams, res):
         windows += len(s["cat"])
@@ -100,7 +105,13 @@ def score(streams, res):
         for t, c in fired:
             if not any(c == e["category"] and e["onset"] <= t <= e["end"] + C.HIT_MARGIN_S for e in tg):
                 fa[(s["kind"], c)] += 1
-    return dict(hits=np.array(hits), lat=np.array(lat), rows=rows, fa=fa, duty=awake / max(windows, 1))
+                # cause: the sound playing at that moment (another target, a distractor, or background)
+                during = [e for e in s["events"] if e["onset"] <= t <= e["end"] + C.HIT_MARGIN_S]
+                e = next((e for e in during if e["role"] == "target"), during[0] if during else None)
+                cause = "background" if e is None else (
+                    f"{e['category'].lower()} target" if e["role"] == "target" else f"{e['subtype']} distractor")
+                causes[f"{c} during {cause}"] = causes.get(f"{c} during {cause}", 0) + 1
+    return dict(hits=np.array(hits), lat=np.array(lat), rows=rows, fa=fa, causes=causes, duty=awake / max(windows, 1))
 
 
 def hours(streams, kind):
@@ -127,6 +138,20 @@ def sweep(fes, streams, base_hits):
 def choose(table, budget):
     ok = [r for r in table if r["gate_miss"] <= budget + 1e-12]
     return min(ok, key=lambda r: (r["duty"], -r["recall"])) if ok else None
+
+
+def tune_thresholds(tune):
+    """Tuned-baseline ablation: per category, the lowest YAMNet threshold whose false alarms on the
+    tuning streams do not exceed those of the app's 0.30 (so recall rises at no extra false alarms)."""
+    rows = []
+    for thr in C.THRESHOLD_GRID:
+        fe = dict(kind="F0", thresholds={c: float(thr) for c in C.ORDER})
+        sc = score(tune, run(fe, tune))
+        cats = np.array([r["category"] for r in sc["rows"]])
+        fa = {c: sum(v for (k, cc), v in sc["fa"].items() if cc == c) for c in C.ORDER}
+        rows.append((float(thr), {c: float(sc["hits"][cats == c].mean()) for c in C.ORDER}, fa))
+    ref = next(r for r in rows if abs(r[0] - 0.30) < 1e-9)
+    return {c: min(t for t, rec, fa in rows if fa[c] <= ref[2][c]) for c in C.ORDER}
 
 
 def cluster_ci(h, groups, rng):
@@ -186,6 +211,7 @@ def summary(fe, test, cost, rng):
         fa_per_hour_idle=sum(v for (k, _), v in sc["fa"].items() if k == "idle") / h_idle,
         fa_per_hour_events=sum(v for (k, _), v in sc["fa"].items() if k == "events") / h_ev,
         fa_per_hour_by_category={f"{k}:{c}": v / (h_idle if k == "idle" else h_ev) for (k, c), v in sc["fa"].items()},
+        fa_count_by_cause=dict(sorted(sc["causes"].items(), key=lambda kv: -kv[1])),
         duty_idle=float(np.mean(d_idle)), duty_events=float(np.mean(d_ev)),
         duty_idle_by_env={e: float(np.mean(v)) for e, v in by_env.items()},
         compute_idle=compute(float(np.mean(d_idle))), compute_events=compute(float(np.mean(d_ev))),
@@ -216,7 +242,10 @@ def main():
     print(f"  -> selected gate variant: {variant}\n", flush=True)
 
     # --- front ends to report on the test set ---------------------------------------------------
-    fes = {"F0": dict(kind="F0"), "F0+A": dict(kind="F0", alarm="loose"), "F0+A strict": dict(kind="F0", alarm="strict")}
+    thresholds = tune_thresholds(tune)
+    print(f"  tuned YAMNet thresholds (no more tuning false alarms than 0.30): {thresholds}", flush=True)
+    fes = {"F0": dict(kind="F0"), "F0+A": dict(kind="F0", alarm="strict"), "F0+A loose": dict(kind="F0", alarm="loose"),
+           "F0*": dict(kind="F0", thresholds=thresholds), "F0*+A": dict(kind="F0", thresholds=thresholds, alarm="strict")}
     for b in C.BUDGETS:
         tag = f"@{100 * b:g}%"
         for k, tk in (("F1", "F1"), ("F2", "F2"), ("F3", f"F3:{variant}")):
@@ -224,13 +253,14 @@ def main():
             if c:
                 fes[k + tag] = c["fe"]
         if f"F3{tag}" in fes:
-            fes[f"F4{tag}"] = dict(fes[f"F3{tag}"], kind="F4", alarm="loose")
+            fes[f"F4{tag}"] = dict(fes[f"F3{tag}"], kind="F4", alarm="strict")
     c = choose(tables["F3:v1"], C.BUDGETS[0])
     if c:
         fes["F3 v1@1%"] = c["fe"]
-    if "F3@1%" in fes:
-        fes["F4 strict@1%"] = dict(fes["F3@1%"], kind="F4", alarm="strict")
-    out = dict(ops_per_window=dict(yamnet=cost[0], gate=cost[1], alarm=cost[2]),
+    for b in ("1%", "3%", "5%"):
+        if f"F3@{b}" in fes:
+            fes[f"F4 loose@{b}"] = dict(fes[f"F3@{b}"], kind="F4", alarm="loose")
+    out = dict(ops_per_window=dict(yamnet=cost[0], gate=cost[1], alarm=cost[2]), tuned_thresholds=thresholds,
                hours={f"{sp}_{k}": hours(ss, k) for sp, ss in (("test", test), ("tune", tune)) for k in ("events", "idle")},
                n_test_targets=int(sum(e["role"] == "target" for s in test for e in s["events"])),
                selected_variant=variant,

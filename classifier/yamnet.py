@@ -73,7 +73,7 @@ def category_scores(scores):
     return out
 
 
-def detect(cat, awake=None, extra=()):
+def detect(cat, awake=None, extra=(), thresholds=None):
     """The app's rule: a category fires when its score >= threshold (and beats its veto labels)
     in `needed` consecutive classified windows, with a 20 s cooldown; most urgent first.
     awake: bool per window (None = always). A sleeping window is not classified; a run of
@@ -81,6 +81,7 @@ def detect(cat, awake=None, extra=()):
     classified windows are at most HOLD_S apart (so every-k-th-window duty cycling can still meet
     a 2-window rule; with no skipping this is exactly the app's rule).
     extra: [(time, category)] detections from the DSP alarm detector, merged under the same cooldown.
+    thresholds: {category: score threshold} overriding the app's 0.30 (tuned-baseline ablation).
     Returns [(time s, category)]."""
     times = (C.WIN + np.arange(len(cat)) * C.HOP) / C.SR
     runs = [0] * len(C.ORDER)
@@ -89,7 +90,7 @@ def detect(cat, awake=None, extra=()):
     ex = sorted(extra)
     e = 0
     last_classified = -1e9
-    thr = np.array([C.CATEGORIES[c]["threshold"] for c in C.ORDER])
+    thr = np.array([(thresholds or {}).get(c, C.CATEGORIES[c]["threshold"]) for c in C.ORDER])
     ok_all = ((cat[:, :, 0] >= thr) & (cat[:, :, 1] < cat[:, :, 0])).tolist()  # per window, per category
     needed = [C.CATEGORIES[c]["needed"] for c in C.ORDER]
     times = times.tolist()
