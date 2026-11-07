@@ -23,19 +23,21 @@ fig = uifigure('Name', 'Listen Before You Classify - live demo', 'Position', [60
 g = uigridlayout(fig, [1 2], 'ColumnWidth', {300, '1x'}, 'Padding', [10 10 10 10]);
 
 % --- Controls -------------------------------------------------------------------------------
-c = uigridlayout(g, [19 1], 'RowHeight', repmat({'fit'}, 1, 19), 'RowSpacing', 6);
+c = uigridlayout(g, [21 1], 'RowHeight', repmat({'fit'}, 1, 21), 'RowSpacing', 5);
 uilabel(c, 'Text', 'Sound', 'FontWeight', 'bold');
 names = demoSounds();
 ddSound = uidropdown(c, 'Items', names, 'Value', names{2});
 uilabel(c, 'Text', 'Room noise (SNR of the sound, dB)');
 slSnr = uislider(c, 'Limits', [-5 40], 'Value', 10, 'MajorTicks', -5:5:40);
 cbGate = uicheckbox(c, 'Text', 'Wake-up gate on (off = YAMNet on every window)', 'Value', true);
+cbTwo = uicheckbox(c, 'Text', 'Two noise floors (catches sounds that swell slowly)', 'Value', true);
 uilabel(c, 'Text', 'Gate threshold \Delta (dB above the noise floor)', 'Interpreter', 'tex');
 slDelta = uislider(c, 'Limits', [5 30], 'Value', P.delta, 'MajorTicks', 5:5:30);
 uilabel(c, 'Text', 'Hangover H (s)');
 slHang = uislider(c, 'Limits', [0 3], 'Value', P.hang, 'MajorTicks', 0:1:3);
 cbDsp = uicheckbox(c, 'Text', 'DSP alarm detector (Goertzel + T-3)', 'Value', true);
 cbStrict = uicheckbox(c, 'Text', 'Strict T-3 (needs the 1.5 s pause)', 'Value', false);
+cbKnock = uicheckbox(c, 'Text', 'DSP knock detector (impulse rhythm)', 'Value', true);
 cbVeto = uicheckbox(c, 'Text', 'Siren veto (fire needs fire score > siren score)', 'Value', true);
 bPlay = uibutton(c, 'Text', 'Play', 'FontSize', 16, 'FontWeight', 'bold', 'BackgroundColor', [0 .62 .45], 'FontColor', 'w');
 bStop = uibutton(c, 'Text', 'Stop');
@@ -70,6 +72,7 @@ bStop.ButtonPushedFcn = @(~, ~) setStop();
         end
         P.delta = slDelta.Value; P.hang = slHang.Value; P.gate = cbGate.Value;
         P.dsp = cbDsp.Value; P.strict = cbStrict.Value; P.veto = cbVeto.Value;
+        P.twoFloor = cbTwo.Value; P.knock = cbKnock.Value;
         [x, onset] = makeScene(ddSound.Value, slSnr.Value, fs);
         R = frontEnd(x, fs, P, S.net, S.classes);
         animate(x, onset, R);
@@ -134,10 +137,12 @@ end
 
 % =================================================================================================
 function P = defaults()
-% The paper's settings: F4 at the 5 % budget (Delta = 18 dB, H = 0 s) and detector v4.
+% The paper's proposed system at the 5 % budget: two-floor gate (Delta = 22 dB, slow floor 0.3 dB/s,
+% offset 6 dB, H = 0 s), alarm detector v4, knock detector (15 dB, 3 impulses, door score >= 0.05), siren veto.
 P = struct('frame', 320, 'nfft', 512, 'hop', 8000, 'win', 15600, 'nbands', 16, 'bandLo', 100, 'bandHi', 7600, ...
-    'smooth', 0.06, 'rise', 3, 'delta', 18, 'hang', 0, 'gate', true, 'dsp', true, 'strict', false, 'veto', true, ...
-    'probeLo', 2800, 'probeHi', 3600, 'ratio', 0.15, 'square', [520 1560 2600], 'thr', 0.30);
+    'smooth', 0.06, 'rise', 3, 'slowRise', 0.3, 'slowOffset', 6, 'twoFloor', true, 'delta', 22, 'hang', 0, ...
+    'gate', true, 'dsp', true, 'strict', false, 'veto', true, 'knock', true, 'kappa', 15, 'knockHits', 3, ...
+    'knockAgree', 0.05, 'probeLo', 2800, 'probeHi', 3600, 'ratio', 0.15, 'square', [520 1560 2600], 'thr', 0.30);
 end
 
 function R = frontEnd(x, fs, P, net, classes)
@@ -158,12 +163,15 @@ for k = 1:P.nbands
 end
 al = exp(-P.frame / fs / P.smooth);
 E = 10 * log10(filter(1 - al, [1 -al], B) + 1e-10);    % one-pole low-pass per band, in dB
-F = zeros(size(E)); fl = min(E(1:min(50, n), :), [], 1); rise = P.rise * P.frame / fs;
+F = zeros(size(E)); Sl = F; fl = min(E(1:min(50, n), :), [], 1); sl = fl;
+rise = P.rise * P.frame / fs; slow = P.slowRise * P.frame / fs;
 for t = 1:n
-    fl = min(E(t, :), fl + rise);                       % floor: follows down at once, rises <= 3 dB/s
-    F(t, :) = fl;
+    fl = min(E(t, :), fl + rise);                       % fast floor: follows down at once, rises <= 3 dB/s
+    sl = min(E(t, :), sl + slow);                       % slow floor: rises <= 0.3 dB/s (remembers the quiet room)
+    F(t, :) = fl; Sl(t, :) = sl;
 end
 R.nov = max(E - F, [], 2);
+if P.twoFloor, R.nov = max(R.nov, max(E - Sl, [], 2) - P.slowOffset); end
 nw = floor((numel(x) - P.win) / P.hop) + 1;
 R.tw = (P.win + (0:nw - 1) * P.hop) / fs;              % time at which each window ends
 R.novw = zeros(1, nw);
@@ -204,8 +212,25 @@ on = ((piezo ./ total > P.ratio & envOk(piezo)) | (sq ./ total > 0.35 & envOk(sq
 dspT = t3Times(on, P.frame / fs, P.strict);
 if ~P.dsp, dspT = []; end
 
-R.alerts = alertRule(R.tw, R.awake, R.catScore, vs, dspT, P.veto, P.thr, R.cats);
-F0 = alertRule(R.tw, true(1, nw), R.catScore, vs, [], false, P.thr, R.cats);
+% Knock path: spectral flux (mean positive band-level rise per frame) -> impulses -> rhythm,
+% kept if YAMNet (when awake) gives the door classes at least knockAgree within 2 s.
+Eraw = 10 * log10(B + 1e-10);
+flux = mean(max(diff([Eraw(1, :); Eraw], 1, 1), 0), 2);
+pk = (find(flux >= movmax(flux, [3 3]) & flux > P.kappa) - 1) * P.frame / fs;
+knockT = [];
+for i = 1:numel(pk) - P.knockHits + 1
+    ioi = diff(pk(i:i + P.knockHits - 1));
+    r = max(ioi(2:end), ioi(1:end - 1)) ./ min(ioi(2:end), ioi(1:end - 1));
+    if all(ioi >= 0.12 & ioi <= 0.6) && all(r <= 1.6)
+        t = pk(i + P.knockHits - 1);
+        near = abs(R.tw - t) <= 2 & R.awake;
+        if any(R.catScore(near, 3) >= P.knockAgree), knockT(end + 1) = t; end %#ok<AGROW>
+    end
+end
+if ~P.knock, knockT = []; end
+
+R.alerts = alertRule(R.tw, R.awake, R.catScore, vs, dspT, P.veto, P.thr, R.cats, knockT);
+F0 = alertRule(R.tw, true(1, nw), R.catScore, vs, [], false, P.thr, R.cats, []);
 R.f0 = F0;
 logTxt = "This system:" + newline;
 for k = 1:size(R.alerts, 1)
@@ -217,10 +242,10 @@ for k = 1:size(F0, 1)
     logTxt = logTxt + sprintf("  %.1f s  %s\n", F0{k, 1}, F0{k, 2});
 end
 if isempty(F0), logTxt = logTxt + "  no alert" + newline; end
-R.log = logTxt + sprintf("\nGate + DSP cost: 0.5 %% of one YAMNet inference per window.");
+R.log = logTxt + sprintf("\nGate + DSP detectors: 0.5 %% of one YAMNet inference per window.");
 end
 
-function A = alertRule(tw, awake, catScore, vs, dspT, veto, thr, cats)
+function A = alertRule(tw, awake, catScore, vs, dspT, veto, thr, cats, knockT)
 %ALERTRULE The alert rule: score >= 0.30 in N classified windows in a row (fire, siren: 2; door: 1),
 % a run survives skipped windows up to 2 s apart, 20 s cooldown per category, most urgent first;
 % DSP alarm detections join under the same cooldown.
@@ -232,6 +257,11 @@ for k = 1:numel(tw)
     for td = dspT(dspT <= t & dspT > t - 0.5)            % DSP detections in the last hop
         if td - last(1) >= 20
             last(1) = td; A(end + 1, :) = {td, "FIRE ALARM (DSP)", col{1}}; %#ok<AGROW>
+        end
+    end
+    for td = knockT(knockT <= t & knockT > t - 0.5)      % DSP knocks in the last hop
+        if td - last(3) >= 20
+            last(3) = td; A(end + 1, :) = {td, "DOOR (DSP knock)", col{3}}; %#ok<AGROW>
         end
     end
     if ~awake(k), continue; end
