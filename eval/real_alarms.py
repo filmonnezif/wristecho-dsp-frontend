@@ -44,7 +44,7 @@ QUERIES = {  # group: (should raise a fire alarm?, queries)
 PER_QUERY = {"smoke alarm": 40, "fire alarm": 30, "look-alike": 12}
 EXCLUDE_WORDS = ("battery", "chirp", "test button", "music", "song", "remix", "carbon monoxide", "co alarm")
 POSITIVE_WORDS = ("smoke", "alarm", "detector")  # a positive's name must say what it is
-MAX_S, SNRS = 30.0, [None, 10, 0]
+MAX_S, SNRS, PRE_S = 30.0, [None, 10, 0], 5.0
 
 
 def search():
@@ -93,9 +93,11 @@ def fetch(clip):
     return path
 
 
-def conditions(clip):
+def conditions(clip, pre_s=0.0):
     """[(condition, audio)]: the clip's first 30 s clean, and mixed into a test-environment
-    background at 10 and 0 dB SNR (over the clip's active frames)."""
+    background at 10 and 0 dB SNR (over the clip's active frames). pre_s: seconds of that
+    background (40 dB below the clip for "clean") before the clip, so the gate's noise floor has
+    settled on the room before the alarm starts, as on an always-listening watch."""
     x = load_mp3(os.path.join(FOLDER, f"{clip['id']}.mp3"))[:int(MAX_S * C.SR)]
     if len(x) < C.WIN:
         return []
@@ -104,24 +106,36 @@ def conditions(clip):
     rng = np.random.default_rng(clip["id"])
     env = C.TEST_ENVS[clip["id"] % len(C.TEST_ENVS)]
     bg = streams.load(os.path.join(C.DATA, "demand", env, "ch01.wav"))
-    i = int(rng.integers(0, len(bg) - len(x)))
-    bg = bg[i:i + len(x)] / (np.sqrt(np.mean(bg[i:i + len(x)] ** 2)) + 1e-9)
+    n_pre = int(pre_s * C.SR)
+    i = int(rng.integers(0, len(bg) - len(x) - n_pre))
+    bg = bg[i:i + n_pre + len(x)]
+    bg = bg / (np.sqrt(np.mean(bg ** 2)) + 1e-9)
     out = []
     for snr in SNRS:
-        y = x if snr is None else (x / rms + bg * 10 ** (-snr / 20)) * rms
+        g = 10 ** (-(40 if snr is None else snr) / 20)
+        y = np.r_[bg[:n_pre] * g, (x / rms + (0 if snr is None else bg[n_pre:] * g))] * rms
         out.append(("clean" if snr is None else f"{snr} dB", np.clip(y, -1, 1).astype(np.float32)))
     return out
 
 
 def job(arg):
-    clip, thresholds, chosen = arg
+    clip, f4, chosen = arg
+    from eval.real_scenes import gate_mask
     out = {}
-    for cond, y in conditions(clip):
+    for cond, y in conditions(clip, pre_s=PRE_S):
         cat = yamnet.category_scores(yamnet.window_scores(y))
-        a3 = bool(frontend.alarm_times(y, strict=True))
-        a4 = bool(frontend.alarm_times(y, cfg=chosen))
+        a3 = frontend.alarm_times(y, strict=True)
+        a4 = frontend.alarm_times(y, cfg=chosen)
         f0 = any(c == "FIRE_ALARM" for _, c in yamnet.detect(cat, siren_veto=True))
-        out[cond] = dict(F0=f0, A_v3=a3, A_v4=a4, F0_A_v3=f0 or a3, F0_A_v4=f0 or a4)
+        r = dict(F0=f0, A_v3=bool(a3), A_v4=bool(a4), F0_A_v3=f0 or bool(a3), F0_A_v4=f0 or bool(a4))
+        if f4:  # the full proposed system: YAMNet only while the gate is awake, plus the DSP detector
+            m = gate_mask(y, f4)
+            fired = yamnet.detect(cat, m, [(t, "FIRE_ALARM") for t in a4], siren_veto=True)
+            k0 = int(PRE_S * C.SR) // C.HOP  # first window that reaches into the clip
+            r.update(F4=any(c == "FIRE_ALARM" for _, c in fired), F4_yamnet_only=any(
+                c == "FIRE_ALARM" for _, c in yamnet.detect(cat, m, siren_veto=True)),
+                awake_during=float(m[k0:].mean()), awake_before=float(m[:max(k0 - 2, 1)].mean()))
+        out[cond] = r
     return (clip, out) if out else None
 
 
@@ -139,8 +153,10 @@ def main():
         return
     clips = clips_downloaded()
     chosen = frontend.chosen_alarm()
+    from eval.real_scenes import proposed_gate
+    f4 = proposed_gate()
     with Pool(C.WORKERS) as pool:
-        res = [r for r in pool.map(job, [(c, None, chosen) for c in clips]) if r]
+        res = [r for r in pool.map(job, [(c, f4, chosen) for c in clips]) if r]
     summary = {}
     for split in ("design", "heldout"):
         for group in QUERIES:
@@ -149,16 +165,21 @@ def main():
                 summary[f"{group} | {split}"] = dict(n=len(rs), fire_expected=QUERIES[group][0],
                                                       **{cond: {d: float(np.mean([o[cond][d] for o in rs])) for d in rs[0][cond]}
                                                          for cond in rs[0]})
-    out = dict(chosen=chosen, summary=summary, clips=[dict(c, result=o) for c, o in res])
+    out = dict(chosen=chosen, gate=f4, summary=summary, clips=[dict(c, result=o) for c, o in res])
     json.dump(out, open(os.path.join(C.RESULTS, "real_alarms.json"), "w"), indent=1)
     print(f"\n  detector v4: {chosen}")
-    print(f"  {'group | split':26s} {'n':>3s} {'cond':>7s} {'F0':>6s} {'DSP v3':>7s} {'DSP v4':>7s} {'F0+v3':>6s} {'F0+v4':>6s}")
+    print(f"  gate (proposed F4): {f4}")
+    print(f"  {'group | split':26s} {'n':>3s} {'cond':>7s} {'F0':>6s} {'DSP v3':>7s} {'DSP v4':>7s} {'F0+v3':>6s} {'F0+v4':>6s}"
+          f" {'F4':>6s} {'F4 YAMNet':>9s} {'awake':>6s} {'before':>6s}")
     for g, s in summary.items():
         for cond in ("clean", "10 dB", "0 dB"):
             v = s[cond]
             print(f"  {g:26s} {s['n']:3d} {cond:>7s} {v['F0']:6.2f} {v['A_v3']:7.2f} {v['A_v4']:7.2f} "
-                  f"{v['F0_A_v3']:6.2f} {v['F0_A_v4']:6.2f}")
-    print("  (share of clips raising a fire alarm; F0 = YAMNet with siren veto; for look-alikes lower is better)")
+                  f"{v['F0_A_v3']:6.2f} {v['F0_A_v4']:6.2f} {v.get('F4', float('nan')):6.2f} "
+                  f"{v.get('F4_yamnet_only', float('nan')):9.2f} {v.get('awake_during', float('nan')):6.2f} "
+                  f"{v.get('awake_before', float('nan')):6.2f}")
+    print("  (share of clips raising a fire alarm; F0 = YAMNet on every window with siren veto; F4 = the proposed system")
+    print("   with the gate; awake/before = classifier duty during the clip / during the background lead-in)")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@
   3. eval/evaluate.py      calibrate on tuning environments, evaluate on unseen test environments
      eval/stress.py        alarm detector outside its specification and on look-alike sounds
      eval/real_alarms.py   real Freesound alarms and look-alikes (clip list in data/freesound.json)
+     eval/real_scenes.py   the proposed system on real recordings: DESED (labelled events) and SINS (home life)
   4. figures/make.py       every figure -> figures/out/
 Optional argument: number of streams (a quick smoke test, e.g. python run_all.py 4).
 """
@@ -15,7 +16,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from eval import alarm_design, evaluate, extract, real_alarms, stress  # noqa: E402
+from eval import alarm_design, evaluate, extract, real_alarms, real_scenes, stress  # noqa: E402
 from figures import make  # noqa: E402
 from paper import make_tables as tables  # noqa: E402
 from setup import download  # noqa: E402
@@ -36,5 +37,6 @@ if __name__ == "__main__":
     step("evaluate", evaluate.main)
     step("stress", stress.main)
     step("real alarms", real_alarms.main)
+    step("real scenes", real_scenes.main)
     step("figures", make.main)
     step("tables", tables.main)
