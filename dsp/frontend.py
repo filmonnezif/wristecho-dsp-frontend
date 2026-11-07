@@ -44,7 +44,7 @@ def band_power(x):
     return level.astype(np.float32), (10 * np.log10(bands + 1e-10)).astype(np.float32)
 
 
-def novelty(bands_db, smooth_s, rank):
+def novelty(bands_db, smooth_s, rank, rise_db_s=None):
     """Per frame: the rank-th largest rise of a band above its own noise floor (dB).
 
     1. Smooth each band's power with a one-pole low-pass, y[t] = (1-a) x[t] + a y[t-1],
@@ -57,7 +57,7 @@ def novelty(bands_db, smooth_s, rank):
     a = np.exp(-C.FRAME / C.SR / smooth_s)
     p = signal.lfilter([1 - a], [1, -a], 10 ** (bands_db.astype(np.float64) / 10), axis=0)
     e = 10 * np.log10(p + 1e-10)
-    rise = C.FLOOR_RISE_DB_S * C.FRAME / C.SR
+    rise = (C.FLOOR_RISE_DB_S if rise_db_s is None else rise_db_s) * C.FRAME / C.SR
     floor = np.empty_like(e)
     f = e[:50].min(axis=0)  # initial floor: quietest of the first second
     for t in range(len(e)):
@@ -79,15 +79,55 @@ def os_cfar(nov_w, ref_s=C.CFAR_REF_S):
 
 
 def gate_novelty(bands_db, n_windows, variant):
-    """Per-window gate statistic for one variant (dict(smooth_s, rank, cfar))."""
+    """Per-window gate statistic for one variant (dict(smooth_s, rank, cfar[, slow_rise, slow_offset])).
+
+    Two-floor variant: a second floor that rises only slow_rise dB/s remembers how quiet the room
+    was, so a sound that swells slower than the fast floor rises (a siren fading in) still stands
+    out above it. The statistic is max(fast rise, slow rise - slow_offset)."""
     w = per_window(novelty(bands_db, variant["smooth_s"], variant["rank"]), n_windows)
+    if variant.get("slow_rise"):
+        slow = per_window(novelty(bands_db, variant["smooth_s"], variant["rank"], variant["slow_rise"]), n_windows)
+        w = np.maximum(w, slow - variant["slow_offset"])
     return os_cfar(w) if variant["cfar"] else w
+
+
+# --- Knock detector -----------------------------------------------------------------------------
+
+def onset_strength(bands_db):
+    """Per frame: mean over bands of the half-wave rectified rise of the band level since the
+    previous frame (spectral flux in dB). A knock is a short broadband impulse: a large jump in
+    every band at once."""
+    d = np.diff(bands_db.astype(np.float32), axis=0, prepend=bands_db[:1])
+    return np.maximum(d, 0).mean(axis=1)
+
+
+def knock_times(flux, kappa, min_hits):
+    """Times (s) at which a knock pattern completes: min_hits impulses (local flux maxima above
+    kappa dB, at least 60 ms apart) with inter-onset intervals of 0.12-0.6 s, and for three or more
+    a regular rhythm (each interval within a factor 1.6 of the previous)."""
+    fs = C.FRAME / C.SR
+    pad = np.r_[np.zeros(3), flux, np.zeros(3)]
+    local = np.lib.stride_tricks.sliding_window_view(pad, 7).max(axis=1)
+    peaks = np.flatnonzero((flux >= local) & (flux > kappa)) * fs
+    hits = []
+    for i in range(len(peaks) - min_hits + 1):
+        q = peaks[i:i + min_hits]
+        ioi = np.diff(q)
+        if ((ioi >= 0.12) & (ioi <= 0.6)).all() and (len(ioi) < 2 or (np.maximum(ioi[1:], ioi[:-1]) /
+                                                                     np.minimum(ioi[1:], ioi[:-1]) <= 1.6).all()):
+            hits.append(float(q[-1]))
+    return hits
 
 
 def gate_features(x):
     """Per frame: level and the v1 novelty (largest band rise, 60 ms smoothing). Kept for tests."""
     level, bands = band_power(x)
     return level, novelty(bands, C.BAND_SMOOTH_S, 1)
+
+
+def knock_ops_per_window():
+    """Knock detector per hop: per frame 16 differences + 16 max + mean, 7-point max for peaks."""
+    return int((3 * C.N_BANDS + 8) * C.HOP // C.FRAME)
 
 
 def gate_ops_per_window():

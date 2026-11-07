@@ -128,13 +128,15 @@ def job(arg):
         a4 = frontend.alarm_times(y, cfg=chosen)
         f0 = any(c == "FIRE_ALARM" for _, c in yamnet.detect(cat, siren_veto=True))
         r = dict(F0=f0, A_v3=bool(a3), A_v4=bool(a4), F0_A_v3=f0 or bool(a3), F0_A_v4=f0 or bool(a4))
-        if f4:  # the full proposed system: YAMNet only while the gate is awake, plus the DSP detector
-            m = gate_mask(y, f4)
-            fired = yamnet.detect(cat, m, [(t, "FIRE_ALARM") for t in a4], siren_veto=True)
+        if f4:  # the full proposed system: YAMNet only while the gate is awake, plus the DSP detectors
+            from eval.real_scenes import system
+            sy = system(y, f4, chosen, cat)
+            alone = system(y, dict(f4, agree_alarm=False, knock=None), chosen, cat)
+            m = sy["mask"]
             k0 = int(PRE_S * C.SR) // C.HOP  # first window that reaches into the clip
-            r.update(F4=any(c == "FIRE_ALARM" for _, c in fired), F4_yamnet_only=any(
-                c == "FIRE_ALARM" for _, c in yamnet.detect(cat, m, siren_veto=True)),
-                awake_during=float(m[k0:].mean()), awake_before=float(m[:max(k0 - 2, 1)].mean()))
+            r.update(F4=any(c == "FIRE_ALARM" for _, c in sy["f4"]),
+                     F4_no_agree=any(c == "FIRE_ALARM" for _, c in alone["f4"]),
+                     awake_during=float(m[k0:].mean()), awake_before=float(m[:max(k0 - 2, 1)].mean()))
         out[cond] = r
     return (clip, out) if out else None
 
@@ -170,13 +172,13 @@ def main():
     print(f"\n  detector v4: {chosen}")
     print(f"  gate (proposed F4): {f4}")
     print(f"  {'group | split':26s} {'n':>3s} {'cond':>7s} {'F0':>6s} {'DSP v3':>7s} {'DSP v4':>7s} {'F0+v3':>6s} {'F0+v4':>6s}"
-          f" {'F4':>6s} {'F4 YAMNet':>9s} {'awake':>6s} {'before':>6s}")
+          f" {'F5':>6s} {'no agree':>9s} {'awake':>6s} {'before':>6s}")
     for g, s in summary.items():
         for cond in ("clean", "10 dB", "0 dB"):
             v = s[cond]
             print(f"  {g:26s} {s['n']:3d} {cond:>7s} {v['F0']:6.2f} {v['A_v3']:7.2f} {v['A_v4']:7.2f} "
                   f"{v['F0_A_v3']:6.2f} {v['F0_A_v4']:6.2f} {v.get('F4', float('nan')):6.2f} "
-                  f"{v.get('F4_yamnet_only', float('nan')):9.2f} {v.get('awake_during', float('nan')):6.2f} "
+                  f"{v.get('F4_no_agree', float('nan')):9.2f} {v.get('awake_during', float('nan')):6.2f} "
                   f"{v.get('awake_before', float('nan')):6.2f}")
     print("  (share of clips raising a fire alarm; F0 = YAMNet on every window with siren veto; F4 = the proposed system")
     print("   with the gate; awake/before = classifier duty during the clip / during the background lead-in)")

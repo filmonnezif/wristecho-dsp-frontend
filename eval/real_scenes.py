@@ -41,27 +41,38 @@ WARMUP_S = 2.0
 
 
 def proposed_gate(budget="5%"):
+    """The proposed system's settings from results.json (F5 if the knock detector was chosen)."""
     p = os.path.join(C.RESULTS, "results.json")
-    return json.load(open(p))["frontends"][f"F4@{budget}"]["frontend"] if os.path.exists(p) else None
+    if not os.path.exists(p):
+        return None
+    f = json.load(open(p))["frontends"]
+    return (f.get(f"F5@{budget}") or f[f"F4@{budget}"])["frontend"]
 
 
-def gate_mask(x, fe):
-    """Classifier windows the gate keeps awake for audio x, with front end fe (kind F3/F4)."""
+def gate_mask(x, fe, bands=None):
+    """Classifier windows the gate keeps awake for audio x, with front end fe (kind F3/F4/F5)."""
     n = yamnet.n_windows(len(x))
-    _, bands = frontend.band_power(x)
+    if bands is None:
+        _, bands = frontend.band_power(x)
     stat = frontend.gate_novelty(bands, n, C.GATE_VARIANTS[fe["variant"]])
     trig = stat > fe["thr"]
     k = int(round(fe["hang"] / (C.HOP / C.SR)))
     return np.convolve(trig.astype(int), np.ones(k + 1, int))[:n] > 0
 
 
-def system(x, fe, cfg):
-    """Always-on classifier (F0, siren veto) and the proposed system (F4) on audio x."""
-    cat = yamnet.category_scores(yamnet.window_scores(x))
-    m = gate_mask(x, fe)
-    alarms = [(t, "FIRE_ALARM") for t in frontend.alarm_times(x, cfg=cfg)]
+def system(x, fe, cfg, cat=None):
+    """Always-on classifier (F0, siren veto) and the proposed system on audio x: gate, DSP alarm
+    detector (with classifier agreement if fe says so), knock detector, siren veto."""
+    from eval.evaluate import extras
+    if cat is None:
+        cat = yamnet.category_scores(yamnet.window_scores(x))
+    _, bands = frontend.band_power(x)
+    m = gate_mask(x, fe, bands)
+    alarms = {"v4": [(t, "FIRE_ALARM") for t in frontend.alarm_times(x, cfg=cfg)]}
+    flux = frontend.onset_strength(bands)
+    ex = extras(fe, cat, m, alarms, lambda kappa, hits: frontend.knock_times(flux, kappa, hits))
     return dict(cat=cat, mask=m, f0=yamnet.detect(cat, siren_veto=True),
-                f4=yamnet.detect(cat, m, alarms, siren_veto=True), alarms=alarms)
+                f4=yamnet.detect(cat, m, ex, siren_veto=fe.get("veto", True)), alarms=alarms["v4"])
 
 
 def fetch(url, path):

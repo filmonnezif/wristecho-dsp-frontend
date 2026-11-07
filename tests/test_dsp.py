@@ -80,3 +80,31 @@ def test_cfar_centres_background():
     w[150] = 40
     c = frontend.os_cfar(w)
     assert abs(np.median(c[40:])) < 1.5 and c[150] > 25
+
+
+def test_two_floor_gate_catches_a_slow_swell():
+    rng = np.random.default_rng(4)
+    t = np.arange(30 * C.SR) / C.SR
+    x = 0.003 * rng.standard_normal(len(t))
+    amp = np.clip((t - 5) / 12, 0, 1) * 0.1  # a 1 kHz tone swelling over 12 s (~3.3 dB/s at the end)
+    x = (x + amp * np.sin(2 * np.pi * 1000 * t)).astype(np.float32)
+    _, bands = frontend.band_power(x)
+    n = (len(x) - C.WIN) // C.HOP + 1
+    fast = frontend.gate_novelty(bands, n, C.GATE_VARIANTS["v1"])
+    two = frontend.gate_novelty(bands, n, C.GATE_VARIANTS["two-floor+10"])
+    late = (C.WIN + np.arange(n) * C.HOP) / C.SR > 15
+    assert two[late].max() > fast[late].max() + 10
+
+
+def test_knock_rhythm():
+    rng = np.random.default_rng(5)
+    x = 0.002 * rng.standard_normal(6 * C.SR).astype(np.float32)
+    for t0 in (2.0, 2.3, 2.6):  # three knocks, 0.3 s apart
+        i = int(t0 * C.SR)
+        x[i:i + 400] += 0.3 * rng.standard_normal(400) * np.exp(-np.arange(400) / 60)
+    _, bands = frontend.band_power(x)
+    flux = frontend.onset_strength(bands)
+    assert frontend.knock_times(flux, 8, 3)
+    one = 0.002 * rng.standard_normal(6 * C.SR).astype(np.float32)
+    one[32000:32400] += 0.3 * rng.standard_normal(400) * np.exp(-np.arange(400) / 60)
+    assert not frontend.knock_times(frontend.onset_strength(frontend.band_power(one)[1]), 8, 2)

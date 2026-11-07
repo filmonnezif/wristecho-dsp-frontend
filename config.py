@@ -62,7 +62,18 @@ GATE_VARIANTS = {
     "smooth2": dict(smooth_s=0.15, rank=2, cfar=False),  # longer smoothing + two bands must rise
     "v1+cfar": dict(smooth_s=0.06, rank=1, cfar=True),
     "smooth2+cfar": dict(smooth_s=0.15, rank=2, cfar=True),
-}  # floor follows a quieter band at once and rises at most 3 dB/s (minimum tracking)
+    # two floors: the fast one (3 dB/s) plus a slow one (0.3 dB/s) for sounds that swell slowly
+    "two-floor+6": dict(smooth_s=0.06, rank=1, cfar=False, slow_rise=0.3, slow_offset=6),
+    "two-floor+10": dict(smooth_s=0.06, rank=1, cfar=False, slow_rise=0.3, slow_offset=10),
+    "two-floor+14": dict(smooth_s=0.06, rank=1, cfar=False, slow_rise=0.3, slow_offset=14),
+}
+VARIANT_BUDGET = 0.05  # the gate statistic is chosen at the deployed (proposed) budget
+# Knock detector (DSP, real knocks): impulse threshold (dB), impulses needed, and the YAMNet
+# door score required within +-2 s (0 = DSP alone). Chosen on tuning streams: most door recall
+# with no more false alarms than the system without it.
+KNOCK_GRID = dict(kappa=[4, 6, 8, 10, 12, 15], hits=[2, 3, 4], agree=[0.0, 0.05, 0.1, 0.2])
+ALARM_AGREE = 0.1  # DSP fire alarm accepted only if YAMNet's fire score reaches this within +-2 s
+AGREE_S = 2.0  # floor follows a quieter band at once and rises at most 3 dB/s (minimum tracking)
 # Goertzel probes, fixed from the alarm literature (not tuned on data): piezo smoke alarms ring at
 # about 3.1 kHz (2.8-3.6 kHz), low-frequency alarms use a 520 Hz square wave (520, 1560, 2600 Hz).
 PIEZO_PROBES = np.arange(2800, 3601, 50)

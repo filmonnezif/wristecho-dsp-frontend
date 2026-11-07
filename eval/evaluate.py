@@ -42,6 +42,7 @@ def _load(p):
                      "strict": [(float(t), "FIRE_ALARM") for t in z["alarms_strict"]],
                      "v4": [(float(t), "FIRE_ALARM") for t in (np.load(a4) if os.path.exists(a4) else z["alarms_strict"])]},
              nov={v: frontend.gate_novelty(bands, n, d) for v, d in C.GATE_VARIANTS.items()},
+             flux=frontend.onset_strength(bands), knocks={},
              **json.loads(str(z["meta"])))
     return s
 
@@ -63,11 +64,16 @@ def name(fe):
         return f"F1(k={fe['k']})"
     if k == "F2":
         return f"F2(T={fe['thr']:g} dBFS, H={fe['hang']} s)"
-    if k in ("F3", "F4"):
-        return (f"{k}({fe['variant']}, D={fe['thr']:g} dB, H={fe['hang']} s{', ' + fe['alarm'] if fe.get('alarm') else ''}"
-                f"{', siren veto' if fe.get('veto') else ''})")
+    if k in ("F3", "F4", "F5"):
+        kn = fe.get("knock")
+        tags = [fe["alarm"]] if fe.get("alarm") else []
+        tags += ["agree"] if fe.get("agree_alarm") else []
+        tags += ["siren veto"] if fe.get("veto") else []
+        tags += [f"knock k={kn['kappa']} n={kn['hits']} a={kn['agree']}"] if kn else []
+        return f"{k}({fe['variant']}, D={fe['thr']:g} dB, H={fe['hang']} s" + "".join(", " + t for t in tags) + ")"
     parts = ([", ".join(f"{c.lower()} {t:g}" for c, t in fe["thresholds"].items())] if fe.get("thresholds") else []) + \
-        ([f"T-3 {fe['alarm']}"] if fe.get("alarm") else []) + (["siren veto"] if fe.get("veto") else [])
+        ([f"T-3 {fe['alarm']}"] if fe.get("alarm") else []) + (["siren veto"] if fe.get("veto") else []) + \
+        ([f"knock k={fe['knock']['kappa']} n={fe['knock']['hits']} a={fe['knock']['agree']}"] if fe.get("knock") else [])
     return k + ("*" if fe.get("thresholds") else "") + (f"({'; '.join(parts)})" if parts else "")
 
 
@@ -82,11 +88,44 @@ def mask(fe, s):
     return hang(s["nov"][fe["variant"]] > fe["thr"], fe["hang"])
 
 
+def agreed(events, cat, m, j, thr):
+    """Keep DSP detections the classifier agrees with: category j scores >= thr in a classified
+    window ending within AGREE_S of the detection."""
+    if thr <= 0:
+        return list(events)
+    tw = (C.WIN + np.arange(len(cat)) * C.HOP) / C.SR
+    ok = cat[:, j, 0] >= thr
+    if m is not None:
+        ok &= m
+    return [(t, c) for t, c in events if ok[np.abs(tw - t) <= C.AGREE_S].any()]
+
+
+def extras(fe, cat, m, alarms, knock_fn):
+    """DSP detections merged into the alert rule for front end fe: fire alarms (optionally only
+    with classifier agreement) and knocks (optionally with agreement)."""
+    out = []
+    if fe.get("alarm"):
+        out += agreed(alarms[fe["alarm"]], cat, m, C.ORDER.index("FIRE_ALARM"), C.ALARM_AGREE if fe.get("agree_alarm") else 0)
+    if fe.get("knock"):
+        k = fe["knock"]
+        out += agreed([(t, "DOOR") for t in knock_fn(k["kappa"], k["hits"])], cat, m, C.ORDER.index("DOOR"), k["agree"])
+    return sorted(out)
+
+
+def stream_knocks(s):
+    def fn(kappa, hits):
+        key = (kappa, hits)
+        if key not in s["knocks"]:
+            s["knocks"][key] = frontend.knock_times(s["flux"], kappa, hits)
+        return s["knocks"][key]
+    return fn
+
+
 def run(fe, streams):
     res = []
     for s in streams:
         m = mask(fe, s)
-        extra = s["alarms"][fe["alarm"]] if fe.get("alarm") else ()
+        extra = extras(fe, s["cat"], m, s["alarms"], stream_knocks(s))
         res.append((m, detect(s["cat"], m, extra, fe.get("thresholds"), fe.get("veto", False))))
     return res
 
@@ -196,10 +235,11 @@ def summary(fe, test, cost, rng):
     by_env = {}
     for s, v in zip(idle, d_idle):
         by_env.setdefault(s["env"], []).append(v)
-    gated = fe["kind"] in ("F2", "F3", "F4")
+    gated = fe["kind"] in ("F2", "F3", "F4", "F5")
 
     def compute(duty):  # multiply-accumulates per window relative to F0
-        return (duty * cost[0] + (cost[1] if gated else 0) + (cost[2] if fe.get("alarm") else 0)) / cost[0]
+        return (duty * cost[0] + (cost[1] if gated else 0) + (cost[2] if fe.get("alarm") else 0)
+                + (cost[3] if fe.get("knock") else 0)) / cost[0]
 
     h_idle, h_ev = hours(test, "idle"), hours(test, "events")
     return dict(
@@ -229,7 +269,8 @@ def main():
     tune = [s for s in data if s["split"] == "tune"]
     test = [s for s in data if s["split"] == "test"]
     from classifier.yamnet import macs_per_window
-    cost = [macs_per_window(), frontend.gate_ops_per_window(), frontend.alarm_ops_per_window(frontend.chosen_alarm())]
+    cost = [macs_per_window(), frontend.gate_ops_per_window(), frontend.alarm_ops_per_window(frontend.chosen_alarm()),
+            frontend.knock_ops_per_window()]
     print(f"  ops per window: YAMNet {cost[0]:,}  gate {cost[1]:,}  alarm {cost[2]:,}", flush=True)
     base = score(tune, run(dict(kind="F0"), tune))["hits"]
     print(f"  tuning: {len(base)} targets, F0 detects {int(base.sum())}", flush=True)
@@ -242,7 +283,7 @@ def main():
     print(f"  {'gate':22s}" + "".join(f"{f'{100 * b:g} %':>10s}" for b in C.BUDGETS))
     for k, t in tables.items():
         print(f"  {k:22s}" + "".join(f"{(100 * c['duty']) if (c := choose(t, b)) else float('nan'):9.1f}%" for b in C.BUDGETS))
-    variant = min(C.GATE_VARIANTS, key=lambda v: (choose(tables[f"F3:{v}"], C.BUDGETS[0]) or {"duty": 9})["duty"])
+    variant = min(C.GATE_VARIANTS, key=lambda v: (choose(tables[f"F3:{v}"], C.VARIANT_BUDGET) or {"duty": 9})["duty"])
     print(f"  -> selected gate variant: {variant}\n", flush=True)
 
     # --- front ends to report on the test set ---------------------------------------------------
@@ -264,7 +305,33 @@ def main():
         fes["F3 v1@1%"] = c["fe"]
     if "F3@5%" in fes:
         fes["F4 v3@5%"] = dict(fes["F3@5%"], kind="F4", alarm="strict", veto=True)
-    out = dict(ops_per_window=dict(yamnet=cost[0], gate=cost[1], alarm=cost[2]), tuned_thresholds=thresholds,
+        fes["F4 agree@5%"] = dict(fes["F4@5%"], agree_alarm=True)
+        # knock detector: most door recall on tuning streams with no more false alarms than without it
+        tune_t = {}
+        base_fe = dict(fes["F4@5%"], agree_alarm=True)
+        b = score(tune, run(base_fe, tune))
+        fa0 = sum(b["fa"].values())
+        cats_t = np.array([r["category"] for r in b["rows"]])
+        best = None
+        for kappa in C.KNOCK_GRID["kappa"]:
+            for hits in C.KNOCK_GRID["hits"]:
+                for agree in C.KNOCK_GRID["agree"]:
+                    kfe = dict(base_fe, knock=dict(kappa=kappa, hits=hits, agree=agree))
+                    sc = score(tune, run(kfe, tune))
+                    fa = sum(sc["fa"].values())
+                    door = float(sc["hits"][cats_t == "DOOR"].mean())
+                    tune_t[f"{kappa}/{hits}/{agree}"] = dict(door=door, fa=fa)
+                    if fa <= fa0 and (best is None or (door, -fa, kappa) > (best[0], -best[1], best[2]["kappa"])):
+                        best = (door, fa, kfe["knock"])
+        out_knock = dict(tune_base_door=float(b["hits"][cats_t == "DOOR"].mean()), tune_base_fa=fa0, chosen=best and best[2],
+                         tune_table=tune_t)
+        print(f"  knock detector: tuning door recall {out_knock['tune_base_door']:.3f} -> {best[0] if best else float('nan'):.3f}"
+              f" (false alarms {fa0} -> {best[1] if best else '-'}), chosen {best and best[2]}", flush=True)
+        if best:
+            fes["F5@5%"] = dict(base_fe, kind="F5", knock=best[2])
+            fes["F4 knock@5%"] = dict(fes["F4@5%"], knock=best[2])
+            fes["F0+knock"] = dict(kind="F0", veto=True, knock=best[2])
+    out = dict(ops_per_window=dict(yamnet=cost[0], gate=cost[1], alarm=cost[2], knock=cost[3]), tuned_thresholds=thresholds,
                hours={f"{sp}_{k}": hours(ss, k) for sp, ss in (("test", test), ("tune", tune)) for k in ("events", "idle")},
                n_test_targets=int(sum(e["role"] == "target" for s in test for e in s["events"])),
                selected_variant=variant,
@@ -298,6 +365,7 @@ def main():
         out["pareto_test"][key] = [dict(fe=r["fe"], duty=r["duty"], recall=r["recall"])
                                    for r in sweep(fes_k, test, h0)]
     out["calibration"] = tables
+    out["knock"] = locals().get("out_knock")
     os.makedirs(C.RESULTS, exist_ok=True)
     json.dump(out, open(os.path.join(C.RESULTS, "results.json"), "w"), indent=1)
     print_table(out)
