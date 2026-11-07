@@ -6,7 +6,7 @@ DESED public evaluation set: 692 real 10 s home recordings (YouTube, Creative Co
   the gated system keeps. Each clip gets a 2 s warm-up (excluded) for the noise floor.
 SINS (DCASE 2018 Task 5): recordings of one real home, 10 s segments labelled with the household's
   activity (absence, watching TV, cooking, ...); up to 400 segments per activity from the first
-  two audio parts (which hold scattered segments, so each is scored on its own after a 2 s
+  audio part (which holds scattered segments, so each is scored on its own after a 2 s
   warm-up). Per activity: classifier duty and alerts per hour of real home life, for the
   always-on classifier and the proposed system.
 The gate and alarm detector settings are the ones chosen earlier (results.json, F4 at the 5 %
@@ -35,7 +35,7 @@ from dsp import frontend  # noqa: E402
 
 DESED_URL = "https://zenodo.org/api/records/4560759/files/DESED_public_eval.tar.gz/content"
 SINS_URL = "https://zenodo.org/api/records/1247102/files/DCASE2018-task5-dev.{part}.zip/content"
-SINS_PARTS = ["meta", "audio.1", "audio.2"]  # 2 of 23 audio parts (~4 GB)
+SINS_PARTS = ["meta", "audio.1"]  # 1 of 23 audio parts (2 GB, ~3,200 segments; Zenodo is slow)
 PER_ACTIVITY = 400  # SINS segments per activity (10 s each)
 WARMUP_S = 2.0
 
