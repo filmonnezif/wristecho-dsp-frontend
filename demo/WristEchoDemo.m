@@ -308,10 +308,13 @@ for i = 1:numel(items)
         R = frontEnd(x, fs, P, net, classes);
         [~, nm] = fileparts(items{i});
         fprintf('%-28s %3d dB | saved %3.0f%% | system: %-32s | always-on: %s\n', nm(1:min(end, 28)), snr, ...
-            100 * (1 - mean(R.awake)), strjoin(erase(string(R.alerts(:, 2)), [" (YAMNet)", " (DSP)"]) + ...
-            string(cellfun(@(c) {''}, R.alerts(:, 2))), ','), strjoin(erase(string(R.f0(:, 2)), " (YAMNet)"), ','));
+            100 * (1 - mean(R.awake)), joinAlerts(R.alerts), joinAlerts(R.f0));
     end
 end
+end
+
+function t = joinAlerts(A)
+if isempty(A), t = '-'; else, t = char(strjoin(reshape(string(A(:, 2)), 1, []), ', ')); end
 end
 
 function [x, onset] = makeScene(name, snr, fs)
