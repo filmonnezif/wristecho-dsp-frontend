@@ -67,6 +67,11 @@ GATE_VARIANTS = {
 # about 3.1 kHz (2.8-3.6 kHz), low-frequency alarms use a 520 Hz square wave (520, 1560, 2600 Hz).
 PIEZO_PROBES = np.arange(2800, 3601, 50)
 SQUARE_PROBES = (520, 1560, 2600)
+PROBE_STEP = 50  # Hz: one DFT bin of a 320-sample frame at 16 kHz
+ALARM_V3 = dict(lo=2800, hi=3600, ratio=0.25, rule="t3_strict")  # first design (v3)
+# Detector redesign (eval/alarm_design.py), searched on the design half of the real recordings:
+ALARM_GRID = dict(bands=[(2800, 3600), (2500, 4000), (2200, 4500), (2000, 5000)], ratios=[0.15, 0.25, 0.35],
+                  rules=["t3_strict", "t3", "periodic4", "periodic6", "t3_strict|periodic4", "t3_strict|periodic6"])
 
 # --- Sweeps and calibration ---------------------------------------------------------------------
 DUTY_K = [1, 2, 3, 4, 6, 8]  # F1: classify every k-th window

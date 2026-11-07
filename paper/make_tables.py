@@ -8,10 +8,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import config as C  # noqa: E402
 
 OUT = os.path.join(C.ROOT, "paper", "generated")
-ROWS = [("F0", "F0 always on (app rule)"), ("F0*", "F0$^\\ast$ tuned thresholds"), ("F1@5%", "F1 every $k$-th"),
-        ("F2@5%", "F2 fixed gate"), ("F3@5%", "F3 adaptive gate"), ("F0+A", "F0 + alarm DSP"),
-        ("F0*+A", "F0$^\\ast$ + alarm DSP"), ("F4@1%", "F4 (1\\,\\% budget)"), ("F4@3%", "F4 (3\\,\\% budget)"),
-        ("F4@5%", "\\textbf{F4 proposed} (5\\,\\%)"), ("F4 loose@5%", "F4, T-3 without pause check")]
+ROWS = [("F0", "F0 always on (app rule)"), ("F0*", "F0$^\\ast$ tuned thresholds"), ("F0 veto", "F0 + siren veto"),
+        ("F1@5%", "F1 every $k$-th"), ("F2@5%", "F2 fixed gate"), ("F3@5%", "F3 adaptive gate"),
+        ("F0+A v3", "F0 + alarm DSP v3"), ("F0+A", "F0 + alarm DSP v4"), ("F4@1%", "F4 (1\\,\\% budget)"),
+        ("F4@3%", "F4 (3\\,\\% budget)"), ("F4@5%", "\\textbf{F4 proposed} (5\\,\\%)"), ("F4 v3@5%", "F4 with DSP v3")]
 
 
 def pct(x, d=1):
@@ -49,25 +49,25 @@ def main():
     p = os.path.join(C.RESULTS, "stress.json")
     if os.path.exists(p):
         s = json.load(open(p))
-        lines = [r"\begin{tabular}{lcrrrr}", r"\toprule", r"Signal & Fire? & YAMNet & T-3 & Strict & 2 cycles \\", r"\midrule"]
+        lines = [r"\begin{tabular}{lcrrrr}", r"\toprule", r"Signal & Fire? & YAMNet & T-3 & Strict & DSP v4 \\", r"\midrule"]
         for n, x in s.items():
             label = n.replace("x0.7", r"$\times$0.7").replace("x1.5", r"$\times$1.5")
             lines.append(f"{label} & "
                          f"{'yes' if x['expected_fire'] else 'no'} & {pct(x['yamnet'], 0)} & {pct(x['t3_loose'], 0)} & "
-                         f"{pct(x['t3_strict'], 0)} & {pct(x['t3_confirmed'], 0)} \\\\")
+                         f"{pct(x['t3_strict'], 0)} & {pct(x.get('dsp_v4'), 0)} \\\\")
         lines += [r"\bottomrule", r"\end{tabular}"]
         open(os.path.join(OUT, "stress_table.tex"), "w").write("\n".join(lines) + "\n")
 
     p = os.path.join(C.RESULTS, "real_alarms.json")
     if os.path.exists(p):
         ra = json.load(open(p))["summary"]
-        lines = [r"\begin{tabular}{llrrrrr}", r"\toprule", r"Group ($n$) & SNR & F0 & F0$^\ast$ & T-3 & F0+A & F0$^\ast$+A \\", r"\midrule"]
+        lines = [r"\begin{tabular}{llrrrrr}", r"\toprule", r"Group ($n$) & SNR & F0 & DSP v3 & DSP v4 & F0+v3 & F0+v4 \\", r"\midrule"]
         for g, x in ra.items():
             for cond in ("clean", "10 dB", "0 dB"):
                 if cond in x:
                     v = x[cond]
-                    lines.append(f"{g} ({x['n']}) & {cond} & {pct(v['F0'], 0)} & {pct(v['F0_tuned'], 0)} & {pct(v['T3'], 0)} & "
-                                 f"{pct(v['F0_A'], 0)} & {pct(v['F0t_A'], 0)} \\\\")
+                    lines.append(f"{g} ({x['n']}) & {cond} & {pct(v['F0'], 0)} & {pct(v['A_v3'], 0)} & {pct(v['A_v4'], 0)} & "
+                                 f"{pct(v['F0_A_v3'], 0)} & {pct(v['F0_A_v4'], 0)} \\\\")
         lines += [r"\bottomrule", r"\end{tabular}"]
         open(os.path.join(OUT, "real_table.tex"), "w").write("\n".join(lines) + "\n")
 

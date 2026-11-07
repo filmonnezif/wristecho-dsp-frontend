@@ -39,6 +39,20 @@ def job(spec):
     return path
 
 
+def alarm_dir(cfg):
+    return os.path.join(C.CACHE, "alarms_" + "_".join(str(cfg[k]) for k in ("lo", "hi", "ratio", "rule")).replace("|", "+"))
+
+
+def alarm_job(arg):
+    """Fire-alarm times of the redesigned detector for one stream (cached per configuration)."""
+    spec, cfg = arg
+    path = os.path.join(alarm_dir(cfg), spec["id"] + ".npy")
+    if not os.path.exists(path):
+        x, _ = streams.render(spec)
+        np.save(path, np.array(frontend.alarm_times(x, cfg=cfg), np.float32))
+    return path
+
+
 def main(limit=None):
     os.makedirs(os.path.join(C.CACHE, "v2"), exist_ok=True)
     specs = streams.specs()[:limit]
@@ -47,6 +61,10 @@ def main(limit=None):
         for i, _ in enumerate(pool.imap_unordered(job, specs), 1):
             if i % 20 == 0 or i == len(specs):
                 print(f"  {i}/{len(specs)} streams, {time.time() - t:.0f} s", flush=True)
+        cfg = frontend.chosen_alarm()
+        os.makedirs(alarm_dir(cfg), exist_ok=True)
+        pool.map(alarm_job, [(sp, cfg) for sp in specs])
+        print(f"  alarm detector {cfg}: {time.time() - t:.0f} s", flush=True)
 
 
 if __name__ == "__main__":

@@ -99,9 +99,10 @@ def gate_ops_per_window():
     return int(per_frame * C.HOP // C.FRAME + 60)
 
 
-def alarm_ops_per_window():
+def alarm_ops_per_window(cfg=None):
     """Goertzel bank per hop: Hann + frame energy 2/sample, 1 MAC/sample per probe, 3 per readout."""
-    probes = len(C.PIEZO_PROBES) + len(C.SQUARE_PROBES)
+    cfg = cfg or C.ALARM_V3
+    probes = len(np.arange(cfg["lo"], cfg["hi"] + 1, C.PROBE_STEP)) + len(C.SQUARE_PROBES)
     per_frame = 2 * C.FRAME + probes * (C.FRAME + 3)
     return int(per_frame * C.HOP // C.FRAME)
 
@@ -131,22 +132,83 @@ def goertzel(frames, freq):
     return s1 * s1 + s2 * s2 - c * s1 * s2
 
 
-def tone_track(x):
-    """Per 20 ms frame: True when one alarm probe holds a large share of the frame energy."""
+def probe_energies(x, freqs):
+    """Goertzel energies per 20 ms frame for the piezo probes `freqs` (frames x probes), the summed
+    square-wave probes (520 Hz + odd harmonics), the frame energy and a loudness mask."""
     fr = _frames(x) * np.hanning(C.FRAME)
     total = np.sum(fr ** 2, axis=1) * C.FRAME / 2 + 1e-12
-    piezo_e = np.max([goertzel(fr, f) for f in C.PIEZO_PROBES], axis=0)
-    square_e = np.sum([goertzel(fr, f) for f in C.SQUARE_PROBES], axis=0)
-    loud = 10 * np.log10(total / C.FRAME) > -75
+    e = np.stack([goertzel(fr, f) for f in freqs], axis=1)
+    sq = np.sum([goertzel(fr, f) for f in C.SQUARE_PROBES], axis=0)
+    return e, sq, total, 10 * np.log10(total / C.FRAME) > -75
 
-    def envelope_ok(e):  # room reverb keeps gaps tonal: "on" only within 8 dB of the 1.5 s peak
-        db = 10 * np.log10(e + 1e-12)
-        pad = np.r_[np.full(74, -300.0), db]
-        return db > np.lib.stride_tricks.sliding_window_view(pad, 75).max(axis=1) - 8
 
-    piezo = (piezo_e / total > 0.25) & envelope_ok(piezo_e)
-    square = (square_e / total > 0.35) & envelope_ok(square_e)
-    return (piezo | square) & loud
+def _envelope_ok(e):
+    """Room reverb keeps the gaps tonal: a frame is "on" only within 8 dB of its 1.5 s running peak."""
+    db = 10 * np.log10(e + 1e-12)
+    pad = np.r_[np.full(74, -300.0), db]
+    return db > np.lib.stride_tricks.sliding_window_view(pad, 75).max(axis=1) - 8
+
+
+def tone_on(e, sq, total, loud, freqs, lo, hi, ratio):
+    """Per frame: True when one piezo probe in [lo, hi] Hz holds more than `ratio` of the frame
+    energy (or the square-wave probes more than 35 %), i.e. the frame is a narrowband tone."""
+    sel = (freqs >= lo) & (freqs <= hi)
+    piezo_e = e[:, sel].max(axis=1)
+    return (((piezo_e / total > ratio) & _envelope_ok(piezo_e)) | ((sq / total > 0.35) & _envelope_ok(sq))) & loud
+
+
+def tone_track(x, cfg=None):
+    """Per 20 ms frame: tonal alarm frames for detector configuration cfg (default: the first
+    design, 2.8-3.6 kHz probes, 25 % of the frame energy)."""
+    cfg = cfg or C.ALARM_V3
+    freqs = np.arange(cfg["lo"], cfg["hi"] + 1, C.PROBE_STEP)
+    return tone_on(*probe_energies(x, freqs), freqs, cfg["lo"], cfg["hi"], cfg["ratio"])
+
+
+def _pulses(on):
+    fs = C.FRAME / C.SR
+    on = ndimage.binary_closing(np.r_[False, on, False], np.ones(6))[1:-1]  # bridge 100 ms dropouts
+    on = signal.medfilt(on.astype(float), 3) > 0.5  # drop blips
+    edges = np.flatnonzero(np.diff(np.r_[0, on.astype(int), 0]))
+    return [(edges[i] * fs, edges[i + 1] * fs) for i in range(0, len(edges), 2)], len(on) * fs
+
+
+def periodic_times(on, min_pulses):
+    """Times (s) at which `min_pulses` regular tonal beeps have been heard: each 0.05-1.0 s long,
+    gaps 0.05-1.5 s, and a steady rhythm (coefficient of variation of the beep period and length
+    below 0.25). Covers alarms that beep continuously instead of in the T-3 rhythm."""
+    pulses, _ = _pulses(on)
+    hits = []
+    for i in range(len(pulses) - min_pulses + 1):
+        p = pulses[i:i + min_pulses]
+        dur = np.array([b - a for a, b in p])
+        gaps = np.array([p[k + 1][0] - p[k][1] for k in range(min_pulses - 1)])
+        period = np.diff([a for a, _ in p])
+        if ((0.05 <= dur) & (dur <= 1.0)).all() and ((0.05 <= gaps) & (gaps <= 1.5)).all() \
+                and period.std() / period.mean() < 0.25 and dur.std() / dur.mean() < 0.25:
+            hits.append(p[-1][1])
+    return hits
+
+
+def decide(on, rule):
+    """Alarm times for a pattern rule: "t3", "t3_strict", "periodicN", or alternatives joined by |."""
+    out = []
+    for r in rule.split("|"):
+        if r == "t3":
+            out += t3_times(on)
+        elif r == "t3_strict":
+            out += t3_times(on, strict=True)
+        elif r.startswith("periodic"):
+            out += periodic_times(on, int(r[len("periodic"):]))
+    return sorted(out)
+
+
+def chosen_alarm():
+    """The detector configuration selected by eval/alarm_design.py, or the first design."""
+    import json
+    import os
+    p = os.path.join(C.RESULTS, "alarm_design.json")
+    return json.load(open(p))["chosen"] if os.path.exists(p) else C.ALARM_V3
 
 
 def t3_times(on, strict=False):
@@ -154,11 +216,7 @@ def t3_times(on, strict=False):
     (ISO 8201: 0.5 s on, 0.5 s off, three times, then 1.5 s off). strict: also require the
     1.5 s pause (no new pulse for 1.0 s after the third), which rejects continuous 1 Hz beepers
     at the cost of ~1 s more latency."""
-    fs = C.FRAME / C.SR
-    on = ndimage.binary_closing(np.r_[False, on, False], np.ones(6))[1:-1]  # bridge 100 ms dropouts
-    on = signal.medfilt(on.astype(float), 3) > 0.5  # drop blips
-    edges = np.flatnonzero(np.diff(np.r_[0, on.astype(int), 0]))
-    pulses = [(edges[i] * fs, edges[i + 1] * fs) for i in range(0, len(edges), 2)]
+    pulses, length = _pulses(on)
     hits = []
     for i in range(len(pulses) - 2):
         p = pulses[i:i + 3]
@@ -168,10 +226,13 @@ def t3_times(on, strict=False):
                 continue
             nxt = pulses[i + 3][0] if i + 3 < len(pulses) else np.inf
             prev_gap = p[0][0] - pulses[i - 1][1] if i > 0 else np.inf
-            if nxt - p[2][1] >= 1.0 and prev_gap >= 1.0 and len(on) * fs >= p[2][1] + 1.0:
+            if nxt - p[2][1] >= 1.0 and prev_gap >= 1.0 and length >= p[2][1] + 1.0:
                 hits.append(p[2][1] + 1.0)  # decided once the pause has lasted 1 s
     return hits
 
 
-def alarm_times(x, strict=False):
-    return t3_times(tone_track(x), strict)
+def alarm_times(x, strict=False, cfg=None):
+    """Fire-alarm times. cfg=None: the first design (T-3, loose or strict); otherwise cfg's rule."""
+    if cfg is None:
+        return t3_times(tone_track(x), strict)
+    return decide(tone_track(x, cfg), cfg["rule"])

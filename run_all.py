@@ -1,6 +1,7 @@
 """Reproduce the whole study: python run_all.py  (about 1 h on a Colab CPU runtime).
 
   1. setup/download.py     datasets + model (skips what exists)
+  1b. eval/alarm_design.py redesign the alarm detector on the design half of the real recordings
   2. eval/extract.py       classifier scores, gate features, alarm detections per stream (cached)
   3. eval/evaluate.py      calibrate on tuning environments, evaluate on unseen test environments
      eval/stress.py        alarm detector outside its specification and on look-alike sounds
@@ -14,7 +15,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from eval import evaluate, extract, real_alarms, stress  # noqa: E402
+from eval import alarm_design, evaluate, extract, real_alarms, stress  # noqa: E402
 from figures import make  # noqa: E402
 from paper import make_tables as tables  # noqa: E402
 from setup import download  # noqa: E402
@@ -30,6 +31,7 @@ def step(name, fn, *a):
 if __name__ == "__main__":
     limit = int(sys.argv[1]) if len(sys.argv) > 1 else None
     step("download", download.main)
+    step("alarm design", alarm_design.main)
     step("extract", extract.main, limit)
     step("evaluate", evaluate.main)
     step("stress", stress.main)

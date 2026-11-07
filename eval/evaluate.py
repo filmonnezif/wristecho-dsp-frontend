@@ -5,8 +5,8 @@ Front ends
   F1      classifier on every k-th window (naive duty cycling)
   F2      fixed energy gate: wake when the HPF'd level exceeds T dBFS
   F3      adaptive gate: wake when the novelty statistic exceeds Delta (variant chosen on tuning data)
-  F4      F3 + the Goertzel/T-3 alarm detector (strict: needs the 1.5 s pause), which raises fire
-          alarms by itself (proposed); "loose" = without the pause check
+  F4      F3 + the Goertzel alarm detector (redesigned on real recordings, eval/alarm_design.py) +
+          the siren veto (proposed); "v3" = the first detector (T-3 strict, 2.8-3.6 kHz)
   F0+A    classifier on every window + the alarm detector (ablation: separates the two effects)
   F0*     classifier on every window with thresholds tuned on the tuning streams (stronger baseline)
 Gates keep the classifier awake for a hangover H after the last trigger.
@@ -32,12 +32,15 @@ from dsp import frontend  # noqa: E402
 
 
 def _load(p):
+    from eval.extract import alarm_dir
     z = np.load(p)
+    a4 = os.path.join(alarm_dir(frontend.chosen_alarm()), os.path.basename(p)[:-4] + ".npy")
     n = int(z["n"])
     bands = z["bands"].astype(np.float32)
     s = dict(cat=z["cat"].astype(np.float32), level=frontend.per_window(z["level"].astype(np.float32), n),
              alarms={"loose": [(float(t), "FIRE_ALARM") for t in z["alarms"]],
-                     "strict": [(float(t), "FIRE_ALARM") for t in z["alarms_strict"]]},
+                     "strict": [(float(t), "FIRE_ALARM") for t in z["alarms_strict"]],
+                     "v4": [(float(t), "FIRE_ALARM") for t in (np.load(a4) if os.path.exists(a4) else z["alarms_strict"])]},
              nov={v: frontend.gate_novelty(bands, n, d) for v, d in C.GATE_VARIANTS.items()},
              **json.loads(str(z["meta"])))
     return s
@@ -226,7 +229,7 @@ def main():
     tune = [s for s in data if s["split"] == "tune"]
     test = [s for s in data if s["split"] == "test"]
     from classifier.yamnet import macs_per_window
-    cost = [macs_per_window(), frontend.gate_ops_per_window(), frontend.alarm_ops_per_window()]
+    cost = [macs_per_window(), frontend.gate_ops_per_window(), frontend.alarm_ops_per_window(frontend.chosen_alarm())]
     print(f"  ops per window: YAMNet {cost[0]:,}  gate {cost[1]:,}  alarm {cost[2]:,}", flush=True)
     base = score(tune, run(dict(kind="F0"), tune))["hits"]
     print(f"  tuning: {len(base)} targets, F0 detects {int(base.sum())}", flush=True)
@@ -245,8 +248,9 @@ def main():
     # --- front ends to report on the test set ---------------------------------------------------
     thresholds = tune_thresholds(tune)
     print(f"  tuned YAMNet thresholds (no more tuning false alarms than 0.30): {thresholds}", flush=True)
-    fes = {"F0": dict(kind="F0"), "F0+A": dict(kind="F0", alarm="strict"), "F0+A loose": dict(kind="F0", alarm="loose"),
-           "F0*": dict(kind="F0", thresholds=thresholds), "F0*+A": dict(kind="F0", thresholds=thresholds, alarm="strict")}
+    fes = {"F0": dict(kind="F0"), "F0 veto": dict(kind="F0", veto=True),
+           "F0+A": dict(kind="F0", alarm="v4", veto=True), "F0+A v3": dict(kind="F0", alarm="strict", veto=True),
+           "F0*": dict(kind="F0", thresholds=thresholds)}
     for b in C.BUDGETS:
         tag = f"@{100 * b:g}%"
         for k, tk in (("F1", "F1"), ("F2", "F2"), ("F3", f"F3:{variant}")):
@@ -254,16 +258,12 @@ def main():
             if c:
                 fes[k + tag] = c["fe"]
         if f"F3{tag}" in fes:
-            fes[f"F4{tag}"] = dict(fes[f"F3{tag}"], kind="F4", alarm="strict")
+            fes[f"F4{tag}"] = dict(fes[f"F3{tag}"], kind="F4", alarm="v4", veto=True)
     c = choose(tables["F3:v1"], C.BUDGETS[0])
     if c:
         fes["F3 v1@1%"] = c["fe"]
-    for b in ("1%", "3%", "5%"):
-        if f"F3@{b}" in fes:
-            fes[f"F4 loose@{b}"] = dict(fes[f"F3@{b}"], kind="F4", alarm="loose")
-    fes["F0 veto"] = dict(kind="F0", veto=True)
-    if "F4@5%" in fes:
-        fes["F4 veto@5%"] = dict(fes["F4@5%"], veto=True)
+    if "F3@5%" in fes:
+        fes["F4 v3@5%"] = dict(fes["F3@5%"], kind="F4", alarm="strict", veto=True)
     out = dict(ops_per_window=dict(yamnet=cost[0], gate=cost[1], alarm=cost[2]), tuned_thresholds=thresholds,
                hours={f"{sp}_{k}": hours(ss, k) for sp, ss in (("test", test), ("tune", tune)) for k in ("events", "idle")},
                n_test_targets=int(sum(e["role"] == "target" for s in test for e in s["events"])),

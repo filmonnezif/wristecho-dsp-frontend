@@ -88,11 +88,11 @@ def stress():
     r = json.load(open(p))
     names = list(r)
     det = [("yamnet", "classifier (F0)", COL["F0"]), ("t3_loose", "T-3", COL["F4"]),
-           ("t3_strict", "T-3 strict", "#F0A27A"), ("t3_confirmed", "T-3 two cycles", "#8C3A12")]
+           ("t3_strict", "T-3 strict", "#F0A27A"), ("dsp_v4", "DSP v4", "#8C3A12")]
     fig, ax = plt.subplots(figsize=(7, 2.6))
     w = 0.8 / len(det)
     for i, (k, lab, col) in enumerate(det):
-        ax.bar(np.arange(len(names)) + i * w, [100 * r[n][k] for n in names], w, color=col, label=lab)
+        ax.bar(np.arange(len(names)) + i * w, [100 * r[n].get(k, 0) for n in names], w, color=col, label=lab)
     ax.set_xticks(np.arange(len(names)) + 0.3, [n + ("" if r[n]["expected_fire"] else "\n(should not fire)") for n in names],
                   rotation=35, ha="right", fontsize=6)
     ax.set(ylabel="fire alarm raised (%)", ylim=(0, 105))
