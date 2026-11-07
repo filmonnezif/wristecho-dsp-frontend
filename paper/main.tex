@@ -1,0 +1,171 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath,amssymb,graphicx,booktabs,siunitx,xcolor}
+\usepackage[hidelinks]{hyperref}
+\graphicspath{{../figures/out/}}
+\newcommand{\TBD}[1]{\textcolor{red}{[#1]}}
+
+\begin{document}
+\title{Listen Before You Classify: An Adaptive DSP Wake-Up Front End\\for Energy-Efficient Emergency Sound Alerts on Wearables}
+\author{\IEEEauthorblockN{\TBD{Authors}}\IEEEauthorblockA{\TBD{Department, Institution}}}
+\maketitle
+
+\begin{abstract}
+\TBD{written last, from the results}
+\end{abstract}
+
+\begin{IEEEkeywords}
+sound event detection, wake-up detector, Goertzel algorithm, noise-floor tracking, assistive technology, energy efficiency
+\end{IEEEkeywords}
+
+\section{Introduction}
+Wearable sound-awareness devices turn important environmental sounds, such as smoke alarms, sirens and
+door knocks, into vibration and visual alerts for Deaf and hard-of-hearing (DHH) people~\cite{jain2020soundwatch}.
+They typically run a pretrained neural classifier such as YAMNet~\cite{hershey2017cnn} on every half second
+of microphone audio. This has two costs. First, \emph{energy}: the classifier runs continuously although
+nothing of interest happens most of the time, and battery life was the main deployment constraint
+reported for on-watch sound recognition~\cite{jain2020soundwatch}. Second, \emph{safety}: general-purpose
+classifiers are trained on everyday audio and can be weak on standardized emergency signals, such as the
+ISO~8201 temporal-three (T-3) smoke-alarm pattern~\cite{iso8201}.
+
+Both problems have a classical signal-processing answer. Emergency alarms are \emph{designed} signals: a
+known pitch and a known on/off rhythm, which a matched detector can recognise directly. And most of the day
+nothing new happens, which a cheap onset detector can tell without a neural network. We therefore ask:
+\emph{can an adaptive DSP front end, which detects emergency alarms itself and wakes the classifier only when a
+new sound starts, cut classifier computation substantially while raising alarm recall, in acoustic
+environments it was never tuned on?}
+
+Our contributions are: (i) a front end built only from classical DSP blocks (a Butterworth high-pass filter,
+a short-time spectrum with per-band minimum-tracking noise floor, and a Goertzel resonator bank with a T-3
+pattern matcher) that costs about 0.5\,\% of one classifier inference; (ii) a controlled comparison against
+continuous inference, naive duty cycling and a fixed energy gate, calibrated on 11 environments and tested on
+6 unseen ones; (iii) an open, one-command reproducible benchmark built only from public data.
+
+\section{Related Work}
+\textbf{Sound awareness for DHH users.} SoundWatch~\cite{jain2020soundwatch} classified environmental sounds
+on a smartwatch and compared watch-only, phone and cloud architectures, finding battery drain a key concern.
+ProtoSound~\cite{jain2022protosound} personalised recognition from few examples. Neither reduces
+\emph{when} the classifier runs.
+
+\textbf{Wake-up detectors and cascades.} Always-on systems commonly place a low-power detector before a costly
+stage~\cite{wakeupreview}; keyword spotting uses small first-stage models that wake larger
+ones~\cite{gruenstein2017cascade}. Recent work cascades a linear screener with a trimmed YAMNet for violence
+detection~\cite{violencecascade2026}. We instead use interpretable, training-free DSP gates, adapt their
+threshold to the room through noise-floor tracking, and add a second, \emph{decision-making} DSP path for
+standardized alarms.
+
+\textbf{Compute versus accuracy.} Sigtia et al.\ compared environmental sound classifiers by accuracy
+and computational cost, including smoke alarms recorded in homes~\cite{sigtia2016cost}.
+
+\section{Method}
+\subsection{Signals and sampling}
+Audio is sampled at $f_s=16$\,kHz, the classifier's native rate. The Nyquist frequency of 8\,kHz covers the
+piezo smoke-alarm band (2.8--3.6\,kHz) and the 520\,Hz low-frequency alarm required for sleeping
+areas in some codes~\cite{nfpa72}, together with its odd harmonics up to the 13th (6.76\,kHz). Synthetic
+square-wave alarms are band-limited below 7.5\,kHz so that no harmonic aliases. The classifier sees a
+0.975\,s window (15\,600 samples) every 0.5\,s.
+
+\subsection{Classifier and decision rule}
+YAMNet (MobileNetV1, 521 AudioSet classes) costs $M_Y=\num{70744064}$ multiply-accumulates (MACs) per window,
+counted from its convolution and dense layers. Its scores are mapped to three alert categories (fire alarm,
+siren, door) by taking the maximum over category labels. An alert fires when the category score is at least
+0.30 in $N$ consecutive classified windows ($N=2$ for fire alarm and siren, 1 for door), with a 20\,s
+cooldown per category and the most urgent category winning. A window the front end skips is not classified
+and breaks a run. The classifier and rule are fixed throughout; only the front end changes.
+
+\subsection{Gate path}
+\textbf{High-pass filter.} Specification: Butterworth, order 2, $f_c=100$\,Hz ($-3$\,dB), maximally flat
+passband; implemented as one biquad,
+\begin{equation}
+H(z)=\frac{b_0+b_1z^{-1}+b_2z^{-2}}{1+a_1z^{-1}+a_2z^{-2}},
+\end{equation}
+with a double zero at $z=1$ (DC) and two poles inside the unit circle (Fig.~\ref{fig:filters}). It removes
+DC offset, handling rumble and wind below the lowest target component (520\,Hz) so they cannot wake the
+classifier.
+
+\textbf{Band energies.} Each 20\,ms frame ($N=320$, Hann window) is transformed with a 512-point FFT and the
+power is summed in $B=16$ log-spaced bands from 100\,Hz to 7.6\,kHz. Band powers are smoothed with a one-pole
+low-pass $\bar P_b[t]=(1-\alpha)P_b[t]+\alpha\bar P_b[t-1]$, $\alpha=e^{-T/\tau}$, $\tau=60$\,ms, which
+reduces the variance of the few-bin low bands. Let $E_b[t]=10\log_{10}\bar P_b[t]$.
+
+\textbf{Noise-floor tracking.} Each band's floor follows the minimum of $E_b$ with a bounded rise,
+\begin{equation}
+F_b[t]=\min\bigl(E_b[t],\,F_b[t-1]+\rho T\bigr),\qquad \rho=3\text{ dB/s},
+\end{equation}
+a simplified form of minimum statistics~\cite{martin2001noise}. It drops to a quieter background at once
+and absorbs a steady sound (a fan, a running tap) within seconds.
+
+\textbf{Novelty and wake-up.} The novelty is $\nu[t]=\max_b(E_b[t]-F_b[t])$, the largest rise of any band above
+its own floor, so the threshold is relative to the room rather than absolute. Before each classifier window the
+gate takes the maximum of $\nu$ over the 0.5\,s just received; if it exceeds $\Delta$, the classifier runs and
+stays awake for a hangover $H$. Because the window spans the last 0.975\,s, the onset that woke the gate is
+inside the first classified window: waking adds no delay.
+
+\subsection{Alarm path}
+\textbf{Goertzel resonator bank.} The power of DFT bin $k$ in a frame is computed by the Goertzel
+recursion~\cite{goertzel1958}
+\begin{equation}
+s[n]=x[n]+2\cos(\omega_k)s[n-1]-s[n-2],\quad |X_k|^2=s_1^2+s_2^2-2\cos(\omega_k)s_1s_2,
+\end{equation}
+a second-order IIR resonator with poles at $e^{\pm j\omega_k}$ on the unit circle, read once after $N$
+samples. It needs one real multiply per sample per probe, against $N\log_2N$ for a full FFT, which pays off
+when only a few frequencies matter. Probes are fixed from the standards, not tuned on data: 17 probes from
+2.8 to 3.6\,kHz (piezo) and 520, 1560 and 2600\,Hz (square-wave fundamental and odd harmonics).
+
+\textbf{Tonal track and T-3 matcher.} A frame is ``on'' when the strongest piezo probe holds over 25\,\% of the
+frame energy (or the three square-wave probes over 35\,\%), and the probe energy is within 8\,dB of its 1.5\,s
+running peak, which rejects reverberant tails. After closing 100\,ms dropouts, a fire alarm is declared when
+three pulses of 0.3--0.8\,s are separated by gaps of 0.3--0.8\,s, the ISO~8201 T-3 timing with tolerance.
+This detector raises the alert by itself, merged with the classifier's alerts under the same cooldown.
+
+\subsection{Front ends compared}
+F0 runs the classifier on every window. F1 runs it on every $k$-th window. F2 wakes it when the high-passed
+frame level exceeds a fixed $T$\,dBFS. F3 is the adaptive novelty gate. F4, the proposed system, is F3 plus
+the alarm path. F0+A (continuous classifier plus alarm path) separates the two effects.
+
+\subsection{Cost}
+Per 0.5\,s hop the gate costs about \TBD{gate ops} MACs and the alarm path \TBD{alarm ops} MACs, counted per
+stage in the code, i.e.\ \TBD{\%} of one classifier inference. Compute relative to F0 is
+$(d\,M_Y + M_\text{gate} + M_\text{alarm})/M_Y$, where $d$ is the classifier duty, the fraction of windows
+classified.
+
+\section{Experimental Setup}
+\textbf{Streams.} Following the event-mixing protocol of DCASE 2017 Task 2~\cite{mesaros2017dcase}, we
+build 5-minute streams from DEMAND~\cite{thiemann2013demand} recordings (8 microphones per environment
+used as separate streams). Each event stream holds 6 targets (2 per category, one per 50\,s slot) at an
+SNR drawn from $\{-5,0,5,10,20\}$\,dB over the event's active frames, and 6 distractors at 0--20\,dB that
+never overlap a target. Each event stream has an \emph{idle} twin with the background only. The background
+level varies per stream between $-50$ and $-35$\,dBFS.
+
+\textbf{Events.} Sirens, doorbells and knocks come from FSD50K~\cite{fonseca2022fsd50k} and
+ESC-50~\cite{piczak2015esc} (clips with exactly one target label; official splits). Because no public set
+of real smoke-alarm recordings exists, fire alarms are synthesized to ISO~8201 with jittered timing and
+pitch, slight FM and a random room impulse response ($RT_{60}$ 0.3--0.8\,s): half piezo (2.9--3.5\,kHz),
+half 520\,Hz square wave. Distractors are other FSD50K/ESC-50 sounds, half of them ``hard'' (bells, phones,
+doors, impacts, beeps, speech, music); clips labelled \emph{Alarm} without a target label are excluded as
+ambiguous.
+
+\textbf{Splits.} Thresholds are chosen on 11 DEMAND environments with tuning clips and alarm seeds; all
+results are on 6 environments never seen in tuning (one per DEMAND category: living room, office, cafeteria,
+street, bus, park) with test clips and seeds.
+
+\textbf{Calibration.} For each gate, we choose the lowest-duty setting ($k$; $T$ and $H$; $\Delta$ and $H$)
+whose \emph{gate-caused} miss rate on tuning data, the share of events F0 detects that the gated system
+misses, is at most 1\,\%.
+
+\textbf{Metrics.} A target is detected if an alert of its category fires between its onset and 1\,s after
+its end. We report recall with 95\,\% bootstrap intervals, false alarms per hour on idle and event streams,
+median latency, classifier duty and relative compute. Paired differences in recall are tested with the exact
+McNemar test.
+
+\section{Results}
+\TBD{from results.json}
+
+\section{Discussion}
+\TBD{}
+
+\section{Conclusion}
+\TBD{}
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+\end{document}

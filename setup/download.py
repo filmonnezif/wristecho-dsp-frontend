@@ -9,6 +9,8 @@ import io
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -21,7 +23,7 @@ ESC_URL = "https://github.com/karoldvl/ESC-50/archive/master.zip"
 FSD_URL = "https://huggingface.co/datasets/Fhrozen/FSD50k/resolve/main/clips/{dir}/{id}.wav"
 
 
-def fetch(url, tries=4):
+def fetch(url, tries=10):
     for i in range(tries):
         try:
             with urllib.request.urlopen(url, timeout=120) as r:
@@ -29,6 +31,10 @@ def fetch(url, tries=4):
         except Exception as e:  # noqa: BLE001
             if i == tries - 1:
                 raise RuntimeError(f"{url}: {e}") from e
+            wait = 2 ** min(i, 6)  # back off; Hugging Face answers 429 when rate-limited
+            if isinstance(e, urllib.error.HTTPError) and e.headers.get("Retry-After", "").isdigit():
+                wait = max(wait, int(e.headers["Retry-After"]))
+            time.sleep(wait)
 
 
 def demand(env):
@@ -65,7 +71,7 @@ def main():
         list(ex.map(demand, C.TUNE_ENVS + C.TEST_ENVS))
     clips = json.load(open(os.path.join(C.ROOT, "data", "cliplist.json")))
     clips = [c for c in clips if c["src"] == "fsd"]
-    with ThreadPoolExecutor(32) as ex:
+    with ThreadPoolExecutor(4) as ex:
         list(ex.map(fsd, clips))
     print(f"FSD50K {len(clips)} clips", flush=True)
 
