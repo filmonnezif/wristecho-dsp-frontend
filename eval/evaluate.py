@@ -61,9 +61,10 @@ def name(fe):
     if k == "F2":
         return f"F2(T={fe['thr']:g} dBFS, H={fe['hang']} s)"
     if k in ("F3", "F4"):
-        return f"{k}({fe['variant']}, D={fe['thr']:g} dB, H={fe['hang']} s{', ' + fe['alarm'] if fe.get('alarm') else ''})"
+        return (f"{k}({fe['variant']}, D={fe['thr']:g} dB, H={fe['hang']} s{', ' + fe['alarm'] if fe.get('alarm') else ''}"
+                f"{', siren veto' if fe.get('veto') else ''})")
     parts = ([", ".join(f"{c.lower()} {t:g}" for c, t in fe["thresholds"].items())] if fe.get("thresholds") else []) + \
-        ([f"T-3 {fe['alarm']}"] if fe.get("alarm") else [])
+        ([f"T-3 {fe['alarm']}"] if fe.get("alarm") else []) + (["siren veto"] if fe.get("veto") else [])
     return k + ("*" if fe.get("thresholds") else "") + (f"({'; '.join(parts)})" if parts else "")
 
 
@@ -83,7 +84,7 @@ def run(fe, streams):
     for s in streams:
         m = mask(fe, s)
         extra = s["alarms"][fe["alarm"]] if fe.get("alarm") else ()
-        res.append((m, detect(s["cat"], m, extra, fe.get("thresholds"))))
+        res.append((m, detect(s["cat"], m, extra, fe.get("thresholds"), fe.get("veto", False))))
     return res
 
 
@@ -260,6 +261,9 @@ def main():
     for b in ("1%", "3%", "5%"):
         if f"F3@{b}" in fes:
             fes[f"F4 loose@{b}"] = dict(fes[f"F3@{b}"], kind="F4", alarm="loose")
+    fes["F0 veto"] = dict(kind="F0", veto=True)
+    if "F4@5%" in fes:
+        fes["F4 veto@5%"] = dict(fes["F4@5%"], veto=True)
     out = dict(ops_per_window=dict(yamnet=cost[0], gate=cost[1], alarm=cost[2]), tuned_thresholds=thresholds,
                hours={f"{sp}_{k}": hours(ss, k) for sp, ss in (("test", test), ("tune", tune)) for k in ("events", "idle")},
                n_test_targets=int(sum(e["role"] == "target" for s in test for e in s["events"])),
