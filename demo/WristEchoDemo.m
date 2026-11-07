@@ -1,5 +1,7 @@
-function WristEchoDemo
+function WristEchoDemo(mode, extra)
 %WRISTECHODEMO Live demo of the DSP wake-up front end ("Listen Before You Classify").
+%   WristEchoDemo('check') runs every sound without the UI and prints what the proposed system and
+%   always-on YAMNet report (WristEchoDemo('check', urls) adds extra recordings by URL).
 %   Pick a sound, set the room noise and the front-end parameters, press Play. The app mixes the
 %   sound into room noise, runs the DSP front end and YAMNet exactly as in the paper, and replays
 %   the result in real time: spectrogram, gate statistic vs. threshold, when YAMNet is awake,
@@ -10,6 +12,11 @@ function WristEchoDemo
 
 fs = 16000;
 P = defaults();
+if nargin && strcmp(mode, 'check')
+    if nargin < 2, extra = {}; end
+    checkAll(P, fs, extra);
+    return
+end
 S = struct('net', [], 'classes', [], 'scene', [], 'res', [], 'stop', false);
 
 fig = uifigure('Name', 'Listen Before You Classify - live demo', 'Position', [60 60 1280 760], 'Color', [1 1 1]);
@@ -284,9 +291,29 @@ for i = 1:size(p, 1) - 2
 end
 end
 
+function checkAll(P, fs, extra)
+[net, classes] = audioPretrainedNetwork("yamnet");
+items = [demoSounds(), extra(:).'];
+for i = 1:numel(items)
+    for snr = [20 10 0]
+        if startsWith(items{i}, 'http')
+            [~, b, e] = fileparts(items{i}); f = fullfile(tempdir, ['wristecho_' b e]);
+            if ~isfile(f), websave(f, items{i}); end
+            [y, f0] = audioread(f); s = resample(mean(y, 2), fs, f0);
+            [x, ~] = makeScene(s, snr, fs);
+        else
+            [x, ~] = makeScene(items{i}, snr, fs);
+        end
+        R = frontEnd(x, fs, P, net, classes);
+        fprintf('%-46s %3d dB | saved %3.0f%% | system: %s | always-on: %s\n', items{i}(1:min(end, 46)), snr, ...
+            100 * (1 - mean(R.awake)), strjoin(string(R.alerts(:, 2)), ', '), extractAfter(R.log, "veto):"));
+    end
+end
+end
+
 function [x, onset] = makeScene(name, snr, fs)
 %MAKESCENE 4 s of room noise, the sound (at most 12 s) at the chosen SNR, then 4 s of room noise.
-s = demoSounds(name, fs);
+if ischar(name) || isstring(name), s = demoSounds(name, fs); else, s = name; name = ''; end
 s = s(1:min(end, 12 * fs));
 fr = reshape(s(1:floor(numel(s) / 320) * 320), 320, []);
 r = sqrt(mean(fr .^ 2)); act = r > max(r) * 10 ^ (-35 / 20);
