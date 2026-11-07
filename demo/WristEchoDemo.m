@@ -34,7 +34,7 @@ bPlay = uibutton(c, 'Text', 'Play', 'FontSize', 16, 'FontWeight', 'bold', 'Backg
 bStop = uibutton(c, 'Text', 'Stop');
 lamp = uilamp(c, 'Color', [.6 .6 .6]);
 lblAwake = uilabel(c, 'Text', 'YAMNet: asleep', 'FontSize', 14);
-lblSaved = uilabel(c, 'Text', 'Classifier compute saved: -', 'FontSize', 14, 'FontWeight', 'bold');
+lblSaved = uilabel(c, 'Text', 'Classifier compute saved: -', 'FontSize', 14, 'FontWeight', 'bold', 'WordWrap', 'on');
 alert = uilabel(c, 'Text', 'no alert', 'FontSize', 26, 'FontWeight', 'bold', 'HorizontalAlignment', 'center', ...
     'BackgroundColor', [.93 .93 .93], 'FontColor', [.4 .4 .4]);
 lblLog = uilabel(c, 'Text', '', 'WordWrap', 'on', 'FontSize', 11);
@@ -73,9 +73,10 @@ bStop.ButtonPushedFcn = @(~, ~) setStop();
         tf = (1:numel(R.nov)) * P.frame / fs;
         tw = R.tw;
         % static parts: full spectrogram and gate statistic, a cursor moves over them
-        [sp, fsp, tsp] = spectrogram(x, hann(512), 384, 512, fs);
-        imagesc(axSpec, tsp, fsp / 1000, 10 * log10(abs(sp) .^ 2 + 1e-12)); axis(axSpec, 'xy');
-        colormap(axSpec, 'turbo'); clim(axSpec, [-110 -30]); ylabel(axSpec, 'kHz');
+        [~, fsp, tsp, ps] = spectrogram(x, hann(512), 384, 512, fs);
+        db = 10 * log10(ps + 1e-14);
+        imagesc(axSpec, tsp, fsp / 1000, db); axis(axSpec, 'xy');
+        colormap(axSpec, 'turbo'); clim(axSpec, [prctile(db(:), 5), max(db(:))]); ylabel(axSpec, 'kHz');
         hold(axSpec, 'on'); cs = xline(axSpec, 0, 'w', 'LineWidth', 1.5);
         xline(axSpec, onset, '--w', 'sound starts'); hold(axSpec, 'off');
         cla(axGate); hold(axGate, 'on');
@@ -110,7 +111,7 @@ bStop.ButtonPushedFcn = @(~, ~) setStop();
                 bar(axYam, categorical(R.cats, R.cats), R.catScore(k, :) .* R.awake(k), 'FaceColor', [.2 .4 .8]);
                 ylim(axYam, [0 1]); yline(axYam, 0.3, '--', 'threshold');
                 fr = max(1, min(numel(R.nov), round(t * fs / P.frame)));
-                bar(axProbe, R.probes / 1000, R.probeShare(fr, :), 'FaceColor', [.84 .37 0]);
+                bar(axProbe, R.probes / 1000, max(R.probeShare(max(1, fr - 24):fr, :), [], 1), 'FaceColor', [.84 .37 0]);
                 ylim(axProbe, [0 1]); yline(axProbe, R.ratio, '--', 'tone share'); xlabel(axProbe, 'kHz');
                 a = find([R.alerts{:, 1}] <= t, 1, 'last');
                 if ~isempty(a)
@@ -196,39 +197,48 @@ on = ((piezo ./ total > P.ratio & envOk(piezo)) | (sq ./ total > 0.35 & envOk(sq
 dspT = t3Times(on, P.frame / fs, P.strict);
 if ~P.dsp, dspT = []; end
 
-% Alert rule (the app's): score >= 0.30 in N classified windows in a row (fire, siren: 2; door: 1),
-% a run survives skipped windows up to 2 s apart, 20 s cooldown, most urgent first; plus DSP alarms.
+R.alerts = alertRule(R.tw, R.awake, R.catScore, vs, dspT, P.veto, P.thr, R.cats);
+F0 = alertRule(R.tw, true(1, nw), R.catScore, vs, [], false, P.thr, R.cats);
+logTxt = "This system:" + newline;
+for k = 1:size(R.alerts, 1)
+    logTxt = logTxt + sprintf("  %.1f s  %s\n", R.alerts{k, 1}, R.alerts{k, 2});
+end
+if isempty(R.alerts), logTxt = logTxt + "  no alert" + newline; end
+logTxt = logTxt + "Always-on YAMNet (no gate, no DSP, no veto):" + newline;
+for k = 1:size(F0, 1)
+    logTxt = logTxt + sprintf("  %.1f s  %s\n", F0{k, 1}, F0{k, 2});
+end
+if isempty(F0), logTxt = logTxt + "  no alert" + newline; end
+R.log = logTxt + sprintf("\nGate + DSP cost: 0.5 %% of one YAMNet inference per window.");
+end
+
+function A = alertRule(tw, awake, catScore, vs, dspT, veto, thr, cats)
+%ALERTRULE The alert rule: score >= 0.30 in N classified windows in a row (fire, siren: 2; door: 1),
+% a run survives skipped windows up to 2 s apart, 20 s cooldown per category, most urgent first;
+% DSP alarm detections join under the same cooldown.
 need = [2 2 1]; runs = [0 0 0]; last = -inf(1, 3); lastCls = -inf;
 col = {[.85 .1 .1], [.1 .3 .85], [.95 .6 0]};
-R.alerts = cell(0, 3); logTxt = "";
-for t = dspT(:).'
-    R.alerts(end + 1, :) = {t, 'FIRE ALARM (DSP)', col{1}}; %#ok<AGROW>
-    last(1) = t;
-end
-for k = 1:nw
-    if ~R.awake(k), continue; end
-    t = R.tw(k);
+A = cell(0, 3);
+for k = 1:numel(tw)
+    t = tw(k);
+    for td = dspT(dspT <= t & dspT > t - 0.5)            % DSP detections in the last hop
+        if td - last(1) >= 20
+            last(1) = td; A(end + 1, :) = {td, "FIRE ALARM (DSP)", col{1}}; %#ok<AGROW>
+        end
+    end
+    if ~awake(k), continue; end
     if t - lastCls > 2.0 + 1e-6, runs(:) = 0; end
     lastCls = t;
-    ok = R.catScore(k, :) >= P.thr;
-    ok(1) = ok(1) && vs(k) < R.catScore(k, 1);
-    if P.veto, ok(1) = ok(1) && R.catScore(k, 1) > R.catScore(k, 2); end
+    ok = catScore(k, :) >= thr;
+    ok(1) = ok(1) && vs(k) < catScore(k, 1);
+    if veto, ok(1) = ok(1) && catScore(k, 1) > catScore(k, 2); end
     runs = (runs + 1) .* ok;
     j = find(runs >= need & t - last >= 20, 1);
     if ~isempty(j)
         last(j) = t; runs(j) = 0;
-        R.alerts(end + 1, :) = {t, upper(R.cats{j}) + " (YAMNet)", col{j}}; %#ok<AGROW>
+        A(end + 1, :) = {t, upper(string(cats{j})) + " (YAMNet)", col{j}}; %#ok<AGROW>
     end
 end
-if ~isempty(R.alerts)
-    [~, o] = sort([R.alerts{:, 1}]); R.alerts = R.alerts(o, :);
-    for k = 1:size(R.alerts, 1)
-        logTxt = logTxt + sprintf("%.1f s  %s\n", R.alerts{k, 1}, R.alerts{k, 2});
-    end
-else
-    logTxt = "No alert.";
-end
-R.log = logTxt + sprintf("\nGate + DSP cost: 0.5 %% of one YAMNet inference per window.");
 end
 
 function E = goertzelBank(frames, freqs, fs)
