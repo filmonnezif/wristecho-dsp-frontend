@@ -41,12 +41,14 @@ WARMUP_S = 2.0
 
 
 def proposed_gate(budget="5%"):
-    """The proposed system's settings from results.json (F5 if the knock detector was chosen)."""
+    """The proposed system's settings from results.json: the gate, DSP alarm detector, knock
+    detector and siren veto (alarm agreement was tested and rejected: it lost recall and did not
+    stop look-alike beepers)."""
     p = os.path.join(C.RESULTS, "results.json")
     if not os.path.exists(p):
         return None
     f = json.load(open(p))["frontends"]
-    return (f.get(f"F5@{budget}") or f[f"F4@{budget}"])["frontend"]
+    return (f.get(f"F4 knock@{budget}") or f[f"F4@{budget}"])["frontend"]
 
 
 def gate_mask(x, fe, bands=None):
