@@ -76,11 +76,15 @@ def job(arg):
     loose, strict = frontend.t3_times(on), frontend.t3_times(on, strict=True)
     confirmed = [t for t in strict if any(3.0 <= t - u <= 5.0 for u in strict)]
     v4 = frontend.alarm_times(x, cfg=frontend.chosen_alarm())
-    cat = yamnet.category_scores(yamnet.window_scores(x))
+    scores, emb = yamnet.window_outputs(x)
+    cat = yamnet.category_scores(scores)
     yam = any(c == "FIRE_ALARM" for _, c in yamnet.detect(cat, siren_veto=True))
+    from classifier import head
+    hd = head.available() and any(c == "FIRE_ALARM" for _, c in yamnet.detect(
+        head.category_scores(emb), thresholds=head.load()["thresholds"], siren_veto=True))
     from eval.evaluate import agreed
     v4_agree = agreed([(t, "FIRE_ALARM") for t in v4], cat, None, C.ORDER.index("FIRE_ALARM"), C.ALARM_AGREE)
-    return name, dict(yamnet=yam, t3_loose=bool(loose), t3_strict=bool(strict), t3_confirmed=bool(confirmed),
+    return name, dict(yamnet=yam, head=bool(hd), t3_loose=bool(loose), t3_strict=bool(strict), t3_confirmed=bool(confirmed),
                       dsp_v4=bool(v4), dsp_v4_agree=bool(v4_agree))
 
 
@@ -94,9 +98,9 @@ def main():
         out[n] = dict(expected_fire=VARIANTS[n][0], **{d: float(np.mean([r[d] for r in rs])) for d in rs[0]})
     os.makedirs(C.RESULTS, exist_ok=True)
     json.dump(out, open(os.path.join(C.RESULTS, "stress.json"), "w"), indent=1)
-    print(f"\n  {'variant':30s} {'should fire':>11s} {'YAMNet':>7s} {'T-3':>6s} {'strict':>7s} {'2 cycles':>8s} {'v4':>6s} {'v4+agree':>8s}")
+    print(f"\n  {'variant':30s} {'should fire':>11s} {'YAMNet':>7s} {'head':>6s} {'T-3':>6s} {'strict':>7s} {'2 cycles':>8s} {'v4':>6s} {'v4+agree':>8s}")
     for n, r in out.items():
-        print(f"  {n:30s} {'yes' if r['expected_fire'] else 'no':>11s} {r['yamnet']:7.2f} {r['t3_loose']:6.2f} "
+        print(f"  {n:30s} {'yes' if r['expected_fire'] else 'no':>11s} {r['yamnet']:7.2f} {r['head']:6.2f} {r['t3_loose']:6.2f} "
               f"{r['t3_strict']:7.2f} {r['t3_confirmed']:8.2f} {r['dsp_v4']:6.2f} {r['dsp_v4_agree']:8.2f}")
 
 

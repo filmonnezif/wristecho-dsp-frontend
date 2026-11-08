@@ -45,6 +45,45 @@ PER_QUERY = {"smoke alarm": 40, "fire alarm": 30, "look-alike": 12}
 EXCLUDE_WORDS = ("battery", "chirp", "test button", "music", "song", "remix", "carbon monoxide", "co alarm")
 POSITIVE_WORDS = ("smoke", "alarm", "detector")  # a positive's name must say what it is
 MAX_S, SNRS, PRE_S = 30.0, [None, 10, 0], 5.0
+# The classes added in v6, in a manifest of their own (data/freesound_extra.json) so the alarm design
+# above keeps its clips: baby cries (stream targets: the design half goes to the tuning/training
+# clips, the held-out half to the test clips).
+EXTRA_MANIFEST = os.path.join(C.ROOT, "data", "freesound_extra.json")
+EXTRA_QUERIES = {  # group: (queries, the name must contain one of, and one of, clips per query)
+    "baby cry": (["baby crying", "baby cry", "infant crying", "newborn crying", "toddler crying", "baby screaming"],
+                 ("baby", "infant", "newborn", "toddler", "child", "kid"), ("cry", "cries", "crying", "scream", "wail", "sob"), 60),
+}
+EXTRA_EXCLUDE = ("music", "song", "remix", "laugh", "giggl", "toy", "doll", "fake", "imitat", "cartoon", "synth", "loop",
+                 "game", "slowed", "joy", "children", "monitor")
+
+
+def search_extra():
+    key = open(os.path.expanduser("~/.config/wristecho/freesound.key")).read().strip()
+    seen, out = {c["id"] for c in json.load(open(MANIFEST))}, []
+    for group, (queries, must1, must2, per_query) in EXTRA_QUERIES.items():
+        for q in queries:
+            params = dict(query=q, filter="duration:[2 TO 120]", sort="score", page_size=150,
+                          fields="id,name,tags,license,username,duration,previews,description")
+            req = urllib.request.Request("https://freesound.org/apiv2/search/text/?" + urllib.parse.urlencode(params),
+                                         headers={"Authorization": f"Token {key}"})
+            n = 0
+            for r in json.load(urllib.request.urlopen(req, timeout=60))["results"]:
+                name = r["name"].lower().replace("_", " ")
+                text = name + " " + " ".join(r["tags"]).lower() + " " + r.get("description", "").lower()
+                if r["id"] in seen or "Sampling" in r["license"] or any(w in text for w in EXTRA_EXCLUDE):
+                    continue
+                if not (any(w in name for w in must1) and any(w in name for w in must2)):
+                    continue
+                seen.add(r["id"])
+                split = "design" if zlib.crc32(r["username"].encode()) % 2 == 0 else "heldout"
+                out.append(dict(id=r["id"], group=group, query=q, split=split, name=r["name"], user=r["username"],
+                                license=r["license"], duration=r["duration"], preview=r["previews"]["preview-hq-mp3"]))
+                n += 1
+                if n >= per_query:
+                    break
+    json.dump(out, open(EXTRA_MANIFEST, "w"), indent=1)
+    from collections import Counter
+    print(f"  {len(out)} clips -> {EXTRA_MANIFEST}: {Counter((c['group'], c['split']) for c in out)}")
 
 
 def search():
@@ -119,24 +158,24 @@ def conditions(clip, pre_s=0.0):
 
 
 def job(arg):
-    clip, f4, chosen = arg
-    from eval.real_scenes import gate_mask
+    clip, gates, chosen = arg
+    from eval.real_scenes import outputs, system
     out = {}
     for cond, y in conditions(clip, pre_s=PRE_S):
-        cat = yamnet.category_scores(yamnet.window_scores(y))
+        cats = outputs(y)
         a3 = frontend.alarm_times(y, strict=True)
         a4 = frontend.alarm_times(y, cfg=chosen)
-        f0 = any(c == "FIRE_ALARM" for _, c in yamnet.detect(cat, siren_veto=True))
+        f0 = any(c == "FIRE_ALARM" for _, c in yamnet.detect(cats["stock"], siren_veto=True))
         r = dict(F0=f0, A_v3=bool(a3), A_v4=bool(a4), F0_A_v3=f0 or bool(a3), F0_A_v4=f0 or bool(a4))
-        if f4:  # the full proposed system: YAMNet only while the gate is awake, plus the DSP detectors
-            from eval.real_scenes import system
-            sy = system(y, f4, chosen, cat)
-            alone = system(y, dict(f4, agree_alarm=False, knock=None), chosen, cat)
-            m = sy["mask"]
-            k0 = int(PRE_S * C.SR) // C.HOP  # first window that reaches into the clip
-            r.update(F4=any(c == "FIRE_ALARM" for _, c in sy["f4"]),
-                     F4_no_agree=any(c == "FIRE_ALARM" for _, c in alone["f4"]),
-                     awake_during=float(m[k0:].mean()), awake_before=float(m[:max(k0 - 2, 1)].mean()))
+        k0 = int(PRE_S * C.SR) // C.HOP  # first window that reaches into the clip
+        for clf, fe in gates.items():  # the proposed system: classifier only while the gate is awake, plus DSP
+            sy = system(y, fe, chosen, cats)
+            tag = "F4" if clf == "stock" else "H4"
+            r[tag] = any(c == "FIRE_ALARM" for _, c in sy["f4"])
+            if clf == "head":
+                r["H0"] = any(c == "FIRE_ALARM" for _, c in sy["f0"])
+            r[f"awake_during_{clf}"] = float(sy["mask"][k0:].mean())
+            r[f"awake_before_{clf}"] = float(sy["mask"][:max(k0 - 2, 1)].mean())
         out[cond] = r
     return (clip, out) if out else None
 
@@ -156,9 +195,9 @@ def main():
     clips = clips_downloaded()
     chosen = frontend.chosen_alarm()
     from eval.real_scenes import proposed_gate
-    f4 = proposed_gate()
+    gates = {clf: fe for clf in ("stock", "head") if (fe := proposed_gate(clf=clf))}
     with Pool(C.WORKERS) as pool:
-        res = [r for r in pool.map(job, [(c, f4, chosen) for c in clips]) if r]
+        res = [r for r in pool.map(job, [(c, gates, chosen) for c in clips]) if r]
     summary = {}
     for split in ("design", "heldout"):
         for group in QUERIES:
@@ -167,22 +206,23 @@ def main():
                 summary[f"{group} | {split}"] = dict(n=len(rs), fire_expected=QUERIES[group][0],
                                                       **{cond: {d: float(np.mean([o[cond][d] for o in rs])) for d in rs[0][cond]}
                                                          for cond in rs[0]})
-    out = dict(chosen=chosen, gate=f4, summary=summary, clips=[dict(c, result=o) for c, o in res])
+    out = dict(chosen=chosen, gates=gates, summary=summary, clips=[dict(c, result=o) for c, o in res])
     json.dump(out, open(os.path.join(C.RESULTS, "real_alarms.json"), "w"), indent=1)
     print(f"\n  detector v4: {chosen}")
-    print(f"  gate (proposed F4): {f4}")
-    print(f"  {'group | split':26s} {'n':>3s} {'cond':>7s} {'F0':>6s} {'DSP v3':>7s} {'DSP v4':>7s} {'F0+v3':>6s} {'F0+v4':>6s}"
-          f" {'F5':>6s} {'no agree':>9s} {'awake':>6s} {'before':>6s}")
+    print(f"  gates (proposed): {gates}")
+    print(f"  {'group | split':26s} {'n':>3s} {'cond':>7s} {'F0':>6s} {'DSP v4':>7s} {'F0+v4':>6s} {'F4':>6s}"
+          f" {'H0':>6s} {'H4':>6s} {'awake':>6s} {'before':>6s}")
+    nan = float("nan")
     for g, s in summary.items():
         for cond in ("clean", "10 dB", "0 dB"):
             v = s[cond]
-            print(f"  {g:26s} {s['n']:3d} {cond:>7s} {v['F0']:6.2f} {v['A_v3']:7.2f} {v['A_v4']:7.2f} "
-                  f"{v['F0_A_v3']:6.2f} {v['F0_A_v4']:6.2f} {v.get('F4', float('nan')):6.2f} "
-                  f"{v.get('F4_no_agree', float('nan')):9.2f} {v.get('awake_during', float('nan')):6.2f} "
-                  f"{v.get('awake_before', float('nan')):6.2f}")
-    print("  (share of clips raising a fire alarm; F0 = YAMNet on every window with siren veto; F4 = the proposed system")
-    print("   with the gate; awake/before = classifier duty during the clip / during the background lead-in)")
+            print(f"  {g:26s} {s['n']:3d} {cond:>7s} {v['F0']:6.2f} {v['A_v4']:7.2f} {v['F0_A_v4']:6.2f} "
+                  f"{v.get('F4', nan):6.2f} {v.get('H0', nan):6.2f} {v.get('H4', nan):6.2f} "
+                  f"{v.get('awake_during_head', v.get('awake_during_stock', nan)):6.2f} "
+                  f"{v.get('awake_before_head', v.get('awake_before_stock', nan)):6.2f}")
+    print("  (share of clips raising a fire alarm; F0/H0 = stock YAMNet / trained head on every window with siren veto;")
+    print("   F4/H4 = the proposed system with each; awake/before = classifier duty during the clip / the lead-in)")
 
 
 if __name__ == "__main__":
-    search() if sys.argv[1:] == ["search"] else main()
+    {"search": search, "search_extra": search_extra}.get(sys.argv[1] if sys.argv[1:] else "", main)()

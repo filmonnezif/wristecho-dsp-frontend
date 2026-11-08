@@ -1,4 +1,8 @@
-"""Step 2 (fast): evaluate every front end as a mask over the cached classifier scores.
+"""Step 2 (fast): evaluate every front end as a mask over the cached classifier outputs.
+
+Each front end runs with one of two classifiers (fe["clf"]): "stock", YAMNet's own labels with the
+app's 0.30 thresholds (or tuned ones, F0*), and "head", the trained head on YAMNet's embedding
+(eval/train_head.py; thresholds chosen on the tuning streams). H* names are the head's front ends.
 
 Front ends
   F0      classifier on every window (the deployed baseline)
@@ -32,23 +36,25 @@ from dsp import frontend  # noqa: E402
 
 
 def _load(p):
-    from eval.extract import alarm_dir
+    from classifier import head, yamnet
     z = np.load(p)
-    a4 = os.path.join(alarm_dir(frontend.chosen_alarm()), os.path.basename(p)[:-4] + ".npy")
     n = int(z["n"])
     bands = z["bands"].astype(np.float32)
-    s = dict(cat=z["cat"].astype(np.float32), level=frontend.per_window(z["level"].astype(np.float32), n),
-             alarms={"loose": [(float(t), "FIRE_ALARM") for t in z["alarms"]],
-                     "strict": [(float(t), "FIRE_ALARM") for t in z["alarms_strict"]],
-                     "v4": [(float(t), "FIRE_ALARM") for t in (np.load(a4) if os.path.exists(a4) else z["alarms_strict"])]},
+    meta = json.loads(str(z["meta"]))
+    cat = {"stock": yamnet.category_scores(z["scores"].astype(np.float32))}
+    if head.available():
+        cat["head"] = head.category_scores(z["emb"].astype(np.float32))
+    s = dict(cat=cat, level=frontend.per_window(z["level"].astype(np.float32), n),
+             alarms={"v4": [(float(t), "FIRE_ALARM") for t in z["alarms"]],
+                     "strict": [(float(t), "FIRE_ALARM") for t in z["alarms_strict"]]},
              nov={v: frontend.gate_novelty(bands, n, d) for v, d in C.GATE_VARIANTS.items()},
-             flux=frontend.onset_strength(bands), knocks={},
-             **json.loads(str(z["meta"])))
+             flux=frontend.onset_strength(bands), knocks={}, **meta)
     return s
 
 
 def load():
-    paths = sorted(glob.glob(os.path.join(C.CACHE, "v2", "*.npz")))
+    from eval.extract import DIRS
+    paths = sorted(glob.glob(os.path.join(DIRS[False], "*.npz")))
     with Pool(C.WORKERS) as pool:
         return pool.map(_load, paths)
 
@@ -59,6 +65,10 @@ def hang(trig, h_s):
 
 
 def name(fe):
+    return ("head " if fe.get("clf") == "head" else "") + _name(fe)
+
+
+def _name(fe):
     k = fe["kind"]
     if k == "F1":
         return f"F1(k={fe['k']})"
@@ -121,12 +131,23 @@ def stream_knocks(s):
     return fn
 
 
+def thresholds_of(fe):
+    if fe.get("thresholds"):
+        return fe["thresholds"]
+    if fe.get("clf") == "head":
+        from classifier import head
+        return head.load()["thresholds"]
+    return None
+
+
 def run(fe, streams):
     res = []
+    thr = thresholds_of(fe)
     for s in streams:
+        cat = s["cat"][fe.get("clf", "stock")]
         m = mask(fe, s)
-        extra = extras(fe, s["cat"], m, s["alarms"], stream_knocks(s))
-        res.append((m, detect(s["cat"], m, extra, fe.get("thresholds"), fe.get("veto", False))))
+        extra = extras(fe, cat, m, s["alarms"], stream_knocks(s))
+        res.append((m, detect(cat, m, extra, thr, fe.get("veto", False))))
     return res
 
 
@@ -183,18 +204,23 @@ def choose(table, budget):
     return min(ok, key=lambda r: (r["duty"], -r["recall"])) if ok else None
 
 
-def tune_thresholds(tune):
-    """Tuned-baseline ablation: per category, the lowest YAMNet threshold whose false alarms on the
-    tuning streams do not exceed those of the app's 0.30 (so recall rises at no extra false alarms)."""
-    rows = []
-    for thr in C.THRESHOLD_GRID:
-        fe = dict(kind="F0", thresholds={c: float(thr) for c in C.ORDER})
+def tune_thresholds(tune, clf="stock", budget=None):
+    """Per category, the lowest threshold whose false alarms on the tuning streams stay within
+    `budget` per hour (FA_BUDGET_PER_H). The same rule sets the head's thresholds and the tuned
+    YAMNet baseline (F0*), so the two classifiers are compared at the same false-alarm budget."""
+    budget = C.FA_BUDGET_PER_H if budget is None else budget
+    h = hours(tune, "idle") + hours(tune, "events")
+    best = {}
+    for thr in C.HEAD_THRESHOLDS[::-1]:  # from strict to loose: keep the last one within budget
+        fe = dict(kind="F0", clf=clf, thresholds={c: float(thr) for c in C.ORDER})
         sc = score(tune, run(fe, tune))
-        cats = np.array([r["category"] for r in sc["rows"]])
-        fa = {c: sum(v for (k, cc), v in sc["fa"].items() if cc == c) for c in C.ORDER}
-        rows.append((float(thr), {c: float(sc["hits"][cats == c].mean()) for c in C.ORDER}, fa))
-    ref = next(r for r in rows if abs(r[0] - 0.30) < 1e-9)
-    return {c: min(t for t, rec, fa in rows if fa[c] <= ref[2][c]) for c in C.ORDER}
+        for c in C.ORDER:
+            fa = sum(v for (k, cc), v in sc["fa"].items() if cc == c) / h
+            if fa <= budget and (c not in best or best[c][1]):
+                best[c] = (float(thr), True)
+            elif c in best:
+                best[c] = (best[c][0], False)  # stop at the first threshold over budget
+    return {c: best.get(c, (float(C.HEAD_THRESHOLDS[-1]),))[0] for c in C.ORDER}
 
 
 def cluster_ci(h, groups, rng):
@@ -236,10 +262,12 @@ def summary(fe, test, cost, rng):
     for s, v in zip(idle, d_idle):
         by_env.setdefault(s["env"], []).append(v)
     gated = fe["kind"] in ("F2", "F3", "F4", "F5")
+    clf_cost = cost[0] + (cost[4] if fe.get("clf") == "head" else 0)
 
     def compute(duty):  # multiply-accumulates per window relative to F0
-        return (duty * cost[0] + (cost[1] if gated else 0) + (cost[2] if fe.get("alarm") else 0)
+        return (duty * clf_cost + (cost[1] if gated else 0) + (cost[2] if fe.get("alarm") else 0)
                 + (cost[3] if fe.get("knock") else 0)) / cost[0]
+
 
     h_idle, h_ev = hours(test, "idle"), hours(test, "events")
     return dict(
@@ -263,85 +291,118 @@ def summary(fe, test, cost, rng):
     )
 
 
+def knock_search(tune, base_fe):
+    """Knock detector setting: most door recall on tuning streams with no more false alarms than
+    the system without it (KNOCK_GRID)."""
+    b = score(tune, run(base_fe, tune))
+    fa0 = sum(b["fa"].values())
+    cats = np.array([r["category"] for r in b["rows"]])
+    table, best = {}, None
+    for kappa in C.KNOCK_GRID["kappa"]:
+        for hits in C.KNOCK_GRID["hits"]:
+            for agree in C.KNOCK_GRID["agree"]:
+                kfe = dict(base_fe, knock=dict(kappa=kappa, hits=hits, agree=agree))
+                sc = score(tune, run(kfe, tune))
+                fa = sum(sc["fa"].values())
+                door = float(sc["hits"][cats == "DOOR"].mean())
+                table[f"{kappa}/{hits}/{agree}"] = dict(door=door, fa=fa)
+                if fa <= fa0 and (best is None or (door, -fa, kappa) > (best[0], -best[1], best[2]["kappa"])):
+                    best = (door, fa, kfe["knock"])
+    base_door = float(b["hits"][cats == "DOOR"].mean())
+    print(f"  knock detector ({base_fe.get('clf', 'stock')}): tuning door recall {base_door:.3f} -> "
+          f"{best[0] if best else float('nan'):.3f} (false alarms {fa0} -> {best[1] if best else '-'}), chosen {best and best[2]}",
+          flush=True)
+    return dict(tune_base_door=base_door, tune_base_fa=fa0, chosen=best and best[2], tune_table=table)
+
+
+def misses(fe_hits, ref_hits, rows):
+    """Why the proposed system misses a target, per category: the gate slept (the same classifier
+    always on catches it) or the classifier itself misses it."""
+    out = {}
+    for c in C.ORDER:
+        sel = np.array([r["category"] == c for r in rows])
+        miss = sel & ~fe_hits
+        out[c] = dict(n=int(sel.sum()), missed=int(miss.sum()), gate_slept=int((miss & ref_hits).sum()),
+                      classifier=int((miss & ~ref_hits).sum()))
+    return out
+
+
 def main():
+    from classifier import head
     rng = np.random.default_rng(C.SEED)
     data = load()
     tune = [s for s in data if s["split"] == "tune"]
     test = [s for s in data if s["split"] == "test"]
+    clfs = ["stock"] + (["head"] if head.available() else [])
     from classifier.yamnet import macs_per_window
     cost = [macs_per_window(), frontend.gate_ops_per_window(), frontend.alarm_ops_per_window(frontend.chosen_alarm()),
-            frontend.knock_ops_per_window()]
-    print(f"  ops per window: YAMNet {cost[0]:,}  gate {cost[1]:,}  alarm {cost[2]:,}", flush=True)
-    base = score(tune, run(dict(kind="F0"), tune))["hits"]
-    print(f"  tuning: {len(base)} targets, F0 detects {int(base.sum())}", flush=True)
+            frontend.knock_ops_per_window(), head.macs() if head.available() else 0]
+    print(f"  ops per window: YAMNet {cost[0]:,}  gate {cost[1]:,}  alarm {cost[2]:,}  knock {cost[3]:,}  head {cost[4]:,}",
+          flush=True)
 
     # --- calibration on tuning data -------------------------------------------------------------
-    tables = {"F1": sweep(grid("F1"), tune, base), "F2": sweep(grid("F2"), tune, base)}
+    base = {c: score(tune, run(dict(kind="F0", clf=c), tune))["hits"] for c in clfs}
+    print(f"  tuning: {len(base['stock'])} targets, always-on detects " +
+          ", ".join(f"{c} {int(b.sum())}" for c, b in base.items()), flush=True)
+    tables = {"F1": sweep(grid("F1"), tune, base["stock"]), "F2": sweep(grid("F2"), tune, base["stock"])}
     for v in C.GATE_VARIANTS:
-        tables[f"F3:{v}"] = sweep(grid("F3", v), tune, base)
+        tables[f"F3:{v}"] = sweep(grid("F3", v), tune, base["stock"])
     print("\n  Tuning environments, lowest classifier duty within each gate-caused miss budget:")
     print(f"  {'gate':22s}" + "".join(f"{f'{100 * b:g} %':>10s}" for b in C.BUDGETS))
     for k, t in tables.items():
         print(f"  {k:22s}" + "".join(f"{(100 * c['duty']) if (c := choose(t, b)) else float('nan'):9.1f}%" for b in C.BUDGETS))
     variant = min(C.GATE_VARIANTS, key=lambda v: (choose(tables[f"F3:{v}"], C.VARIANT_BUDGET) or {"duty": 9})["duty"])
     print(f"  -> selected gate variant: {variant}\n", flush=True)
+    if "head" in clfs:  # the same gate statistic, recalibrated against the head's own detections
+        tables["H3"] = sweep([dict(fe, clf="head") for fe in grid("F3", variant)], tune, base["head"])
 
     # --- front ends to report on the test set ---------------------------------------------------
     thresholds = tune_thresholds(tune)
-    print(f"  tuned YAMNet thresholds (no more tuning false alarms than 0.30): {thresholds}", flush=True)
-    fes = {"F0": dict(kind="F0"), "F0 veto": dict(kind="F0", veto=True),
-           "F0+A": dict(kind="F0", alarm="v4", veto=True), "F0+A v3": dict(kind="F0", alarm="strict", veto=True),
-           "F0*": dict(kind="F0", thresholds=thresholds)}
+    print(f"  tuned YAMNet thresholds ({C.FA_BUDGET_PER_H} FA/h per category on tuning): {thresholds}", flush=True)
+    if "head" in clfs:
+        print(f"  head thresholds: {head.load()['thresholds']}", flush=True)
+    fes = {"F0": dict(kind="F0"), "F0*": dict(kind="F0", thresholds=thresholds),
+           "F0+DSP": dict(kind="F0", alarm="v4", veto=True)}
     for b in C.BUDGETS:
         tag = f"@{100 * b:g}%"
         for k, tk in (("F1", "F1"), ("F2", "F2"), ("F3", f"F3:{variant}")):
             c = choose(tables[tk], b)
             if c:
                 fes[k + tag] = c["fe"]
-        if f"F3{tag}" in fes:
-            fes[f"F4{tag}"] = dict(fes[f"F3{tag}"], kind="F4", alarm="v4", veto=True)
-    c = choose(tables["F3:v1"], C.BUDGETS[0])
-    if c:
-        fes["F3 v1@1%"] = c["fe"]
-    if "F3@5%" in fes:
-        fes["F4 v3@5%"] = dict(fes["F3@5%"], kind="F4", alarm="strict", veto=True)
-        fes["F4 agree@5%"] = dict(fes["F4@5%"], agree_alarm=True)
-        # knock detector: most door recall on tuning streams with no more false alarms than without it
-        tune_t = {}
-        base_fe = dict(fes["F4@5%"], agree_alarm=True)
-        b = score(tune, run(base_fe, tune))
-        fa0 = sum(b["fa"].values())
-        cats_t = np.array([r["category"] for r in b["rows"]])
-        best = None
-        for kappa in C.KNOCK_GRID["kappa"]:
-            for hits in C.KNOCK_GRID["hits"]:
-                for agree in C.KNOCK_GRID["agree"]:
-                    kfe = dict(base_fe, knock=dict(kappa=kappa, hits=hits, agree=agree))
-                    sc = score(tune, run(kfe, tune))
-                    fa = sum(sc["fa"].values())
-                    door = float(sc["hits"][cats_t == "DOOR"].mean())
-                    tune_t[f"{kappa}/{hits}/{agree}"] = dict(door=door, fa=fa)
-                    if fa <= fa0 and (best is None or (door, -fa, kappa) > (best[0], -best[1], best[2]["kappa"])):
-                        best = (door, fa, kfe["knock"])
-        out_knock = dict(tune_base_door=float(b["hits"][cats_t == "DOOR"].mean()), tune_base_fa=fa0, chosen=best and best[2],
-                         tune_table=tune_t)
-        print(f"  knock detector: tuning door recall {out_knock['tune_base_door']:.3f} -> {best[0] if best else float('nan'):.3f}"
-              f" (false alarms {fa0} -> {best[1] if best else '-'}), chosen {best and best[2]}", flush=True)
-        if best:
-            fes["F5@5%"] = dict(base_fe, kind="F5", knock=best[2])
-            fes["F4 knock@5%"] = dict(fes["F4@5%"], knock=best[2])
-            fes["F0+knock"] = dict(kind="F0", veto=True, knock=best[2])
-    out = dict(ops_per_window=dict(yamnet=cost[0], gate=cost[1], alarm=cost[2], knock=cost[3]), tuned_thresholds=thresholds,
+        if "head" in clfs and (c := choose(tables["H3"], b)):
+            fes["H3" + tag] = c["fe"]
+    knock = {}
+    for clf, g, a in (("stock", "F3@5%", "F4"), ("head", "H3@5%", "H4")):
+        if g not in fes:
+            continue
+        fes[f"{a}@5%"] = dict(fes[g], kind="F4", alarm="v4", veto=True)
+        knock[clf] = knock_search(tune, fes[f"{a}@5%"])
+        if knock[clf]["chosen"]:
+            fes[f"{a} knock@5%"] = dict(fes[f"{a}@5%"], knock=knock[clf]["chosen"])
+    if "head" in clfs:
+        fes["H0"] = dict(kind="F0", clf="head")
+        fes["H0+DSP"] = dict(kind="F0", clf="head", alarm="v4", veto=True, **({"knock": knock["head"]["chosen"]}
+                                                                              if knock.get("head", {}).get("chosen") else {}))
+    if knock.get("stock", {}).get("chosen"):
+        fes["F0+DSP"]["knock"] = knock["stock"]["chosen"]
+    out = dict(ops_per_window=dict(yamnet=cost[0], gate=cost[1], alarm=cost[2], knock=cost[3], head=cost[4]),
+               tuned_thresholds=thresholds, head_thresholds=head.load()["thresholds"] if "head" in clfs else None,
                hours={f"{sp}_{k}": hours(ss, k) for sp, ss in (("test", test), ("tune", tune)) for k in ("events", "idle")},
                n_test_targets=int(sum(e["role"] == "target" for s in test for e in s["events"])),
-               selected_variant=variant,
-               frontends={k: summary(fe, test, cost, rng) for k, fe in fes.items()})
+               selected_variant=variant, frontends={k: summary(fe, test, cost, rng) for k, fe in fes.items()})
     f = out["frontends"]
-    h0 = np.array(f["F0"]["hits"])
-    cats = np.array([r["category"] for r in score(test, run(dict(kind="F0"), test))["rows"]])
-    out["tests"] = {f"{k} vs F0": dict(all=mcnemar(np.array(v["hits"]), h0),
-                                        **{c: mcnemar(np.array(v["hits"])[cats == c], h0[cats == c]) for c in C.ORDER})
-                    for k, v in f.items() if k != "F0"}
+    rows = score(test, run(dict(kind="F0"), test))["rows"]
+    cats = np.array([r["category"] for r in rows])
+
+    def test_pair(a, b):
+        ha, hb = np.array(f[a]["hits"]), np.array(f[b]["hits"])
+        return dict(all=mcnemar(ha, hb), **{c: mcnemar(ha[cats == c], hb[cats == c]) for c in C.ORDER})
+    out["tests"] = {f"{k} vs F0": test_pair(k, "F0") for k in f if k != "F0"}
+    for a, b in (("H0", "F0*"), ("H4 knock@5%", "H0"), ("H4 knock@5%", "F4 knock@5%"), ("H0+DSP", "H0"), ("F0+DSP", "F0")):
+        if a in f and b in f:
+            out["tests"][f"{a} vs {b}"] = test_pair(a, b)
+    out["misses"] = {k: misses(np.array(f[k]["hits"], bool), np.array(f[ref]["hits"], bool), rows)
+                     for k, ref in (("F4 knock@5%", "F0+DSP"), ("H4 knock@5%", "H0+DSP")) if k in f and ref in f}
     # Ablation of gate variants at the 1 % budget (setting chosen on tuning, measured on test)
     out["ablation"] = {}
     for v in C.GATE_VARIANTS:
@@ -351,21 +412,21 @@ def main():
             out["ablation"][v] = dict(setting=name(c["fe"]), tune_duty=c["duty"], tune_gate_miss=c["gate_miss"],
                                       test_duty_idle=s["duty_idle"], test_duty_events=s["duty_events"],
                                       test_recall=s["recall"], test_duty_idle_by_env=s["duty_idle_by_env"])
-    c2 = choose(tables["F2"], C.BUDGETS[0])
     # Trade-off curves on the test set (figure only; chosen points come from tuning)
+    h0 = np.array(f["F0"]["hits"], bool)
     out["pareto_test"] = {}
-    for key, kind, v in (("F1", "F1", None), ("F2", "F2", None), ("F3 v1", "F3", "v1"), ("F3", "F3", variant)):
-        hs = None
-        if kind == "F2" and c2:
-            hs = c2["fe"]["hang"]
-        elif kind == "F3":
-            cc = choose(tables[f"F3:{v}"], C.BUDGETS[0])
-            hs = cc["fe"]["hang"] if cc else None
-        fes_k = [fe for fe in grid(kind, v) if hs is None or fe.get("hang") == hs]
-        out["pareto_test"][key] = [dict(fe=r["fe"], duty=r["duty"], recall=r["recall"])
-                                   for r in sweep(fes_k, test, h0)]
+    for key, kind, v, clf in (("F1", "F1", None, "stock"), ("F2", "F2", None, "stock"), ("F3 v1", "F3", "v1", "stock"),
+                              ("F3", "F3", variant, "stock"), ("H3", "F3", variant, "head")):
+        if clf not in clfs:
+            continue
+        cc = choose(tables["F2" if kind == "F2" else ("H3" if clf == "head" else f"F3:{v}") if kind == "F3" else "F1"],
+                    C.BUDGETS[0])
+        hs = cc["fe"].get("hang") if cc else None
+        fes_k = [dict(fe, clf=clf) for fe in grid(kind, v) if hs is None or fe.get("hang") == hs]
+        ref = h0 if clf == "stock" else np.array(f["H0"]["hits"], bool)
+        out["pareto_test"][key] = [dict(fe=r["fe"], duty=r["duty"], recall=r["recall"]) for r in sweep(fes_k, test, ref)]
     out["calibration"] = tables
-    out["knock"] = locals().get("out_knock")
+    out["knock"] = knock
     os.makedirs(C.RESULTS, exist_ok=True)
     json.dump(out, open(os.path.join(C.RESULTS, "results.json"), "w"), indent=1)
     print_table(out)
@@ -374,15 +435,20 @@ def main():
 def print_table(out):
     print(f"Test: {out['n_test_targets']} targets, {out['hours']['test_events']:.1f} h event streams, "
           f"{out['hours']['test_idle']:.1f} h idle streams")
-    print(f"{'front end':14s} {'recall':>7s} {'95% CI':>13s} {'fire':>6s} {'siren':>6s} {'door':>6s} "
+    short = {"FIRE_ALARM": "alarm", "SIREN": "siren", "CAR_HORN": "horn", "BABY_CRY": "baby", "DOOR": "door"}
+    print(f"{'front end':14s} {'recall':>7s} {'95% CI':>13s} " + "".join(f"{short[c]:>6s} " for c in C.ORDER) +
           f"{'FA/h id':>7s} {'FA/h ev':>7s} {'duty id':>7s} {'duty ev':>7s} {'ops id':>6s} {'lat':>5s}  setting")
     for k, r in out["frontends"].items():
         bc = r["by_category"]
         ci = r["recall_ci"]
-        print(f"{k:14s} {r['recall']:7.3f} [{ci[0]:.3f},{ci[1]:.3f}] {bc['FIRE_ALARM']['recall']:6.3f} "
-              f"{bc['SIREN']['recall']:6.3f} {bc['DOOR']['recall']:6.3f} {r['fa_per_hour_idle']:7.2f} "
+        print(f"{k:14s} {r['recall']:7.3f} [{ci[0]:.3f},{ci[1]:.3f}] " +
+              "".join(f"{bc[c]['recall']:6.3f} " for c in C.ORDER) +
+              f"{r['fa_per_hour_idle']:7.2f} "
               f"{r['fa_per_hour_events']:7.2f} {r['duty_idle']:7.3f} {r['duty_events']:7.3f} {r['compute_idle']:6.3f} "
               f"{r['latency_median_s'] or float('nan'):5.2f}  {r['name']}")
+    for k, m in out.get("misses", {}).items():
+        print(f"  misses of {k}: " + ", ".join(f"{c.lower()} {v['missed']}/{v['n']} (gate {v['gate_slept']})"
+                                              for c, v in m.items()))
     print("\nGate variants at the 1 % budget (chosen on tuning, measured on test):")
     for v, a in out["ablation"].items():
         print(f"  {v:14s} tune duty {a['tune_duty']:.3f}  test duty idle {a['test_duty_idle']:.3f} "

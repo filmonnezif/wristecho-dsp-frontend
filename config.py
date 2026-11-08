@@ -28,13 +28,23 @@ CHANNELS = [1, 3, 5, 7, 9, 11, 13, 15]  # DEMAND microphones used as separate st
 TUNE_ENVS = ["DKITCHEN", "DWASHING", "NFIELD", "NRIVER", "OHALLWAY", "OMEETING", "PRESTO", "PSTATION",
              "SPSQUARE", "TCAR", "TMETRO"]
 TEST_ENVS = ["DLIVING", "OOFFICE", "PCAFETER", "STRAFFIC", "TBUS", "NPARK"]
-TARGETS_PER_STREAM = 6  # 2 per category, one every ~50 s slot
-DISTRACTORS_PER_STREAM = 6  # everyday non-target sounds (half of them "hard": bells, phones, doors...)
+# 10 targets per stream, one every 30 s slot: 2 sirens, 2 car horns, 2 baby cries, 2 door sounds,
+# 1 synthetic T-3 fire alarm and 1 real fire/smoke alarm recording.
+STREAM_EVENTS = ["SIREN", "SIREN", "CAR_HORN", "CAR_HORN", "BABY_CRY", "BABY_CRY", "DOOR", "DOOR",
+                 "FIRE_ALARM:t3", "FIRE_ALARM:real"]
+TARGETS_PER_STREAM = len(STREAM_EVENTS)
+DISTRACTORS_PER_STREAM = 8  # everyday non-target sounds (half of them "hard": bells, phones, beeps...)
 SNRS_DB = [-5, 0, 5, 10, 20]  # target event SNR over its active frames
 DISTRACTOR_SNR_DB = (0, 20)
 BG_DBFS = (-50, -35)  # background level varies per stream (room loudness, mic gain)
 MAX_EVENT_S = 8.0
-ALARM_SEEDS = {"tune": range(0, 60), "test": range(100, 140)}
+ALARM_SEEDS = {"tune": range(0, 60), "test": range(100, 140), "train": range(200, 400)}
+# Classifier-head training streams: the tuning environments' even microphones (the odd ones are the
+# tuning streams), two renderings each, from the tuning clips set aside for training (TRAIN_SHARE of
+# them, by clip id). Thresholds are then chosen on the tuning streams, whose clips the head never saw.
+TRAIN_CHANNELS = [2, 4, 6, 8, 10, 12, 14, 16]
+TRAIN_COPIES = 2
+TRAIN_SHARE = 0.7
 
 # --- Classifier decision rule (the WristEcho app's SoundDetector) ------------------------------
 CATEGORIES = {
@@ -42,9 +52,21 @@ CATEGORIES = {
                        veto=["Ringtone", "Telephone", "Telephone bell ringing"]),
     "SIREN": dict(labels=["Siren", "Civil defense siren", "Police car (siren)", "Ambulance (siren)",
                           "Fire engine, fire truck (siren)", "Emergency vehicle"], threshold=0.30, needed=2, veto=[]),
+    "CAR_HORN": dict(labels=["Vehicle horn, car horn, honking", "Air horn, truck horn"], threshold=0.30, needed=1, veto=[]),
+    "BABY_CRY": dict(labels=["Baby cry, infant cry"], threshold=0.30, needed=2, veto=[]),
     "DOOR": dict(labels=["Knock", "Doorbell", "Ding-dong"], threshold=0.30, needed=1, veto=[]),
 }
 ORDER = list(CATEGORIES)  # priority: most urgent first
+
+# --- Trained classifier head ---------------------------------------------------------------------
+# A small classifier on YAMNet's 1024-d embedding (YAMNet itself stays frozen), trained on the
+# training streams. A window is labelled with a target category when that target's sound (frames
+# within LABEL_DB of its own peak) covers at least LABEL_MIN_S of the window; otherwise "other".
+HEAD_CLASSES = ORDER + ["OTHER"]
+LABEL_DB, LABEL_MIN_S = 30.0, 0.06
+HEAD_MODELS = {"logreg": dict(C=[0.01, 0.1, 1.0]), "mlp": dict(hidden=[128, 256], alpha=[1e-4, 1e-3])}
+FA_BUDGET_PER_H = 0.3  # per category: thresholds of the head (and tuned YAMNet) keep tuning FA/h below this
+HEAD_THRESHOLDS = np.round(np.arange(0.05, 0.951, 0.025), 3)
 COOLDOWN_S = 20.0
 HIT_MARGIN_S = 1.0  # a detection counts for an event from its onset to 1 s after it ends
 
@@ -71,7 +93,7 @@ VARIANT_BUDGET = 0.05  # the gate statistic is chosen at the deployed (proposed)
 # Knock detector (DSP, real knocks): impulse threshold (dB), impulses needed, and the YAMNet
 # door score required within +-2 s (0 = DSP alone). Chosen on tuning streams: most door recall
 # with no more false alarms than the system without it.
-KNOCK_GRID = dict(kappa=[4, 6, 8, 10, 12, 15], hits=[2, 3, 4], agree=[0.0, 0.05, 0.1, 0.2])
+KNOCK_GRID = dict(kappa=[6, 8, 10, 12, 15, 18], hits=[2, 3, 4], agree=[0.0, 0.05, 0.1, 0.2])
 ALARM_AGREE = 0.1  # DSP fire alarm accepted only if YAMNet's fire score reaches this within +-2 s
 AGREE_S = 2.0  # floor follows a quieter band at once and rises at most 3 dB/s (minimum tracking)
 # Goertzel probes, fixed from the alarm literature (not tuned on data): piezo smoke alarms ring at
@@ -92,6 +114,6 @@ HANGOVER_S = [0, 1, 2]  # keep the classifier awake this long after a trigger
 BUDGETS = [0.01, 0.03, 0.05]  # max share of F0's detections lost *because the gate slept* (tuning)
 HOLD_S = 2.0  # an N-window run survives skipped windows if classified windows are <= 2 s apart
 BOOTSTRAP = 2000
-THRESHOLD_GRID = np.round(np.arange(0.05, 0.501, 0.025), 3)  # tuned-baseline search (must contain 0.30)
+THRESHOLD_GRID = HEAD_THRESHOLDS  # tuned-baseline search (must contain 0.30)
 
 WORKERS = int(os.environ.get("WORKERS", os.cpu_count() or 2))

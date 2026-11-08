@@ -1,8 +1,9 @@
-"""Reproduce the whole study: python run_all.py  (about 1 h on a Colab CPU runtime).
+"""Reproduce the whole study: python run_all.py  (about 1.5 h on a Colab CPU runtime).
 
   1. setup/download.py     datasets + model (skips what exists)
   1b. eval/alarm_design.py redesign the alarm detector on the design half of the real recordings
-  2. eval/extract.py       classifier scores, gate features, alarm detections per stream (cached)
+  2. eval/extract.py       classifier scores + embeddings, gate features, alarm detections per stream (cached)
+  2b. eval/train_head.py   the classifier head on YAMNet's embeddings (training streams), thresholds (tuning)
   3. eval/evaluate.py      calibrate on tuning environments, evaluate on unseen test environments
      eval/stress.py        alarm detector outside its specification and on look-alike sounds
      eval/real_alarms.py   real Freesound alarms and look-alikes (clip list in data/freesound.json)
@@ -16,7 +17,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from eval import alarm_design, evaluate, extract, real_alarms, real_scenes, stress  # noqa: E402
+from eval import alarm_design, evaluate, extract, real_alarms, real_scenes, stress, train_head  # noqa: E402
 from figures import make  # noqa: E402
 from paper import make_tables as tables  # noqa: E402
 from setup import download  # noqa: E402
@@ -34,6 +35,7 @@ if __name__ == "__main__":
     step("download", download.main)
     step("alarm design", alarm_design.main)
     step("extract", extract.main, limit)
+    step("train head", train_head.main)
     step("evaluate", evaluate.main)
     step("stress", stress.main)
     step("real alarms", real_alarms.main)

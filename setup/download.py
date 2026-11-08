@@ -1,9 +1,11 @@
 """Download everything the study needs into DATA_DIR (default ./datasets), skipping what exists.
 
   YAMNet       MediaPipe yamnet.tflite (labels embedded)
-  DEMAND       17 environments, 16 kHz, only the channels in config.CHANNELS (Zenodo 1227121)
+  DEMAND       17 environments, 16 kHz, the channels in config.CHANNELS (+ TRAIN_CHANNELS for the
+               tuning environments) (Zenodo 1227121)
   ESC-50       GitHub archive
   FSD50K       only the clips listed in data/cliplist.json (Hugging Face mirror, one file each)
+  Freesound    previews of the clips listed in data/cliplist.json (no API key needed)
 """
 import io
 import json
@@ -39,7 +41,7 @@ def fetch(url, tries=10):
 
 def demand(env):
     folder = os.path.join(C.DATA, "demand", env)
-    want = [f"ch{c:02d}.wav" for c in C.CHANNELS]
+    want = [f"ch{c:02d}.wav" for c in C.CHANNELS + (C.TRAIN_CHANNELS if env in C.TUNE_ENVS else [])]
     if all(os.path.exists(os.path.join(folder, w)) for w in want):
         return
     z = zipfile.ZipFile(io.BytesIO(fetch(DEMAND_URL.format(env=env))))
@@ -60,6 +62,16 @@ def fsd(clip):
         os.replace(path + ".part", path)
 
 
+def freesound(clip):
+    path = os.path.join(C.DATA, "freesound", clip["id"] + ".mp3")
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        data = fetch(clip["preview"])
+        with open(path + ".part", "wb") as f:
+            f.write(data)
+        os.replace(path + ".part", path)
+
+
 def main():
     os.makedirs(C.DATA, exist_ok=True)
     if not os.path.exists(C.MODEL):
@@ -70,6 +82,8 @@ def main():
     with ThreadPoolExecutor(6) as ex:
         list(ex.map(demand, C.TUNE_ENVS + C.TEST_ENVS))
     clips = json.load(open(os.path.join(C.ROOT, "data", "cliplist.json")))
+    with ThreadPoolExecutor(4) as ex:
+        list(ex.map(freesound, [c for c in clips if c["src"] == "fs"]))
     clips = [c for c in clips if c["src"] == "fsd"]
     with ThreadPoolExecutor(8) as ex:  # backoff in fetch() handles rate limiting
         list(ex.map(fsd, clips))

@@ -7,6 +7,7 @@ import config as C
 
 _interp = None
 _labels = None
+_emb_index = None
 
 
 def labels():
@@ -17,11 +18,18 @@ def labels():
 
 
 def _model():
-    global _interp
+    """The interpreter keeps every intermediate tensor, so the embedding (the 1024-d input of the
+    final fully connected layer, after global average pooling) can be read with the scores."""
+    global _interp, _emb_index
     if _interp is None:
         from ai_edge_litert.interpreter import Interpreter
-        _interp = Interpreter(C.MODEL, num_threads=1)
+        _interp = Interpreter(C.MODEL, num_threads=1, experimental_preserve_all_tensors=True)
         _interp.allocate_tensors()
+        shape = {t["index"]: list(t["shape"]) for t in _interp.get_tensor_details()}
+        fc = [op for op in _interp._get_ops_details() if op["op_name"] == "FULLY_CONNECTED"
+              and shape[op["outputs"][0]][-1] == len(labels())]
+        _emb_index = int(fc[-1]["inputs"][0])
+        assert shape[_emb_index][-1] == 1024, shape[_emb_index]
     return _interp
 
 
@@ -48,17 +56,25 @@ def n_windows(n_samples):
     return (n_samples - C.WIN) // C.HOP + 1
 
 
-def window_scores(x):
-    """(n_windows, 521) scores; window k covers samples [k*HOP, k*HOP + WIN)."""
+def window_outputs(x):
+    """(n_windows, 521) scores and (n_windows, 1024) embeddings; window k covers samples
+    [k*HOP, k*HOP + WIN)."""
     m = _model()
     out = m.get_output_details()[0]["index"]
     n = n_windows(len(x))
     scores = np.empty((n, len(labels())), np.float32)
+    emb = np.empty((n, 1024), np.float32)
     for k in range(n):
-        m.set_tensor(0, x[k * C.HOP:k * C.HOP + C.WIN].astype(np.float32))
+        m.set_tensor(m.get_input_details()[0]["index"], x[k * C.HOP:k * C.HOP + C.WIN].astype(np.float32))
         m.invoke()
         scores[k] = m.get_tensor(out)[0]
-    return scores
+        emb[k] = m.get_tensor(_emb_index).reshape(-1)
+    return scores, emb
+
+
+def window_scores(x):
+    """(n_windows, 521) scores."""
+    return window_outputs(x)[0]
 
 
 def category_scores(scores):

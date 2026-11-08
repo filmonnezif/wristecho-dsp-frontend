@@ -1,16 +1,18 @@
 """Test streams: 5-minute DEMAND recordings with sparse target events and distractors mixed in.
 
 Each environment x microphone gives two streams:
-  "events"  6 targets (2 fire alarms, 2 sirens, 2 door sounds; one per 50 s slot) at an SNR from
-            SNRS_DB, plus 6 distractors (everyday sounds, half "hard") placed so they never
-            overlap a target.
+  "events"  12 targets (config.STREAM_EVENTS, one per 25 s slot) at an SNR from SNRS_DB, plus 8
+            distractors (everyday sounds, half "hard") placed so they never overlap a target.
   "idle"    the same background alone: what the watch hears most of the day.
 The background level varies per stream (BG_DBFS), as room loudness and mic gain do. SNR = event
 power over its active frames / background power. Targets come from the stream's split only, so
-test streams contain no clip, alarm seed or environment used for tuning.
+test streams contain no clip, alarm seed or environment used for tuning. Training streams (for the
+classifier head) use the tuning environments' other microphones and the tuning clips of the
+"train" pool; tuning streams use the "calib" pool, so thresholds are chosen on unseen clips.
 """
 import json
 import os
+import subprocess
 from math import gcd
 
 import numpy as np
@@ -21,8 +23,13 @@ import config as C
 
 
 def load(path):
-    x, sr = sf.read(path, dtype="float32", always_2d=True)
-    x = x[:, 0]
+    try:
+        x, sr = sf.read(path, dtype="float32", always_2d=True)
+        x = x[:, 0]
+    except Exception:  # noqa: BLE001  (MP3 on an older libsndfile): decode with ffmpeg
+        raw = subprocess.run(["ffmpeg", "-v", "quiet", "-i", path, "-f", "f32le", "-ac", "1", "-ar", str(C.SR), "-"],
+                             capture_output=True, check=True).stdout
+        return np.frombuffer(raw, np.float32).copy()
     if sr != C.SR:
         g = gcd(sr, C.SR)
         x = signal.resample_poly(x, C.SR // g, sr // g).astype(np.float32)
@@ -70,33 +77,39 @@ def synthetic_alarm(seed):
 
 
 def clip_path(c):
+    if c["src"] == "fs":
+        return os.path.join(C.DATA, "freesound", c["id"] + ".mp3")
     if c["src"] == "esc":
         return os.path.join(C.DATA, "ESC-50-master", "audio", c["id"])
     return os.path.join(C.DATA, "fsd50k", "clips", c["dir"], c["id"] + ".wav")
 
 
-def specs():
-    """All stream specs (deterministic from config.SEED)."""
-    clips = json.load(open(os.path.join(C.ROOT, "data", "cliplist.json")))
-    rng = np.random.default_rng(C.SEED)
+def _stream_specs(rng, split, envs, channels, copies, pool, clips):
+    def mine(c):
+        return c["split"] == ("tune" if split == "train" else split) and (pool is None or c.get("pool") == pool)
+    targets = {}
+    for c in clips:
+        if mine(c) and c["role"] == "target":
+            targets.setdefault(c["category"], []).append(c)
+    dis = [c for c in clips if mine(c) and c["role"] == "distractor"]
+    alarms = list(C.ALARM_SEEDS[split])
     out = []
-    for split, envs in (("tune", C.TUNE_ENVS), ("test", C.TEST_ENVS)):
-        pool = {k: [c for c in clips if c["split"] == split and c["role"] == "target" and c["category"] == k]
-                for k in ("SIREN", "DOOR")}
-        dis = [c for c in clips if c["split"] == split and c["role"] == "distractor"]
-        alarms = list(C.ALARM_SEEDS[split])
-        for env in envs:
-            for ch in C.CHANNELS:
-                cats = ["FIRE_ALARM", "SIREN", "DOOR"] * 2
-                rng.shuffle(cats)
+    for env in envs:
+        for ch in channels:
+            for copy in range(copies):
+                kinds = list(C.STREAM_EVENTS)
+                rng.shuffle(kinds)
                 slot = C.STREAM_S / C.TARGETS_PER_STREAM
                 events = []
-                for i, cat in enumerate(cats):
-                    if cat == "FIRE_ALARM":
+                for i, kind in enumerate(kinds):
+                    cat, _, how = kind.partition(":")
+                    if how == "t3":
                         seed = int(rng.choice(alarms))
                         src = dict(kind="alarm", seed=seed, subtype="piezo" if seed % 2 == 0 else "520hz")
                     else:
-                        c = pool[cat][rng.integers(len(pool[cat]))]
+                        pool_c = [c for c in targets[cat] if c["subtype"] == "real"] if how == "real" else \
+                            [c for c in targets[cat] if c["subtype"] != "real"]
+                        c = pool_c[rng.integers(len(pool_c))]
                         src = dict(kind="clip", clip=c, subtype=c["subtype"])
                     events.append(dict(role="target", category=cat, source=src,
                                        onset=float(i * slot + rng.uniform(2, slot - C.MAX_EVENT_S - 4)),
@@ -107,11 +120,37 @@ def specs():
                                        onset=float(rng.uniform(0, C.STREAM_S - C.MAX_EVENT_S)),  # placed in render()
                                        snr=float(rng.uniform(*C.DISTRACTOR_SNR_DB))))
                 bg_dbfs = float(rng.uniform(*C.BG_DBFS))
-                for kind in ("events", "idle"):
-                    out.append(dict(id=f"{split}-{env}-ch{ch:02d}-{kind}", split=split, env=env, ch=ch, kind=kind,
-                                    bg_dbfs=bg_dbfs, events=events if kind == "events" else [],
-                                    place_seed=int(rng.integers(1 << 30))))
+                for kind in (("events",) if split == "train" else ("events", "idle")):
+                    sid = f"{split}-{env}-ch{ch:02d}" + (f"-{copy}" if split == "train" else "") + f"-{kind}"
+                    out.append(dict(id=sid, split=split, env=env, ch=ch, kind=kind, bg_dbfs=bg_dbfs,
+                                    events=events if kind == "events" else [], place_seed=int(rng.integers(1 << 30))))
     return out
+
+
+def specs(train=False):
+    """Stream specs (deterministic from config.SEED): tuning + test streams, or (train=True) the
+    classifier head's training streams."""
+    clips = json.load(open(os.path.join(C.ROOT, "data", "cliplist.json")))
+    if train:
+        return _stream_specs(np.random.default_rng(C.SEED + 1), "train", C.TUNE_ENVS, C.TRAIN_CHANNELS,
+                             C.TRAIN_COPIES, "train", clips)
+    rng = np.random.default_rng(C.SEED)
+    return (_stream_specs(rng, "tune", C.TUNE_ENVS, C.CHANNELS, 1, "calib", clips) +
+            _stream_specs(rng, "test", C.TEST_ENVS, C.CHANNELS, 1, None, clips))
+
+
+def active_spans(a, onset, db=None):
+    """Seconds (absolute) where event audio a, starting at onset, is within db of its own peak
+    (20 ms frames, merged): where the target is actually sounding (labels for the head)."""
+    db = C.LABEL_DB if db is None else db
+    f = 320
+    n = len(a) // f
+    if n == 0:
+        return []
+    e = 10 * np.log10(np.mean(a[:n * f].reshape(n, f) ** 2, axis=1) + 1e-12)
+    on = np.r_[0, (e > e.max() - db).astype(int), 0]
+    d = np.flatnonzero(np.diff(on))
+    return [[onset + d[i] * f / C.SR, onset + d[i + 1] * f / C.SR] for i in range(0, len(d), 2)]
 
 
 def event_audio(src):
@@ -151,5 +190,6 @@ def render(spec):
         if ev["role"] == "target":
             busy.append((onset, onset + dur))
         placed.append(dict(role=ev["role"], category=ev["category"], subtype=ev["source"]["subtype"],
-                           onset=onset, end=onset + len(a) / C.SR, snr=ev["snr"]))
+                           onset=onset, end=onset + len(a) / C.SR, snr=ev["snr"],
+                           active=active_spans(a, onset) if ev["role"] == "target" else []))
     return np.clip(x, -1, 1).astype(np.float32), placed

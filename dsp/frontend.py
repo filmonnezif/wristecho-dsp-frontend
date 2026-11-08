@@ -5,6 +5,7 @@ Gate path   x -> 2nd-order Butterworth HPF (100 Hz) -> 20 ms frames -> |FFT|^2 i
             largest band rise [dB] -> optional ordered-statistic CFAR (median of the last 10 s)
 Alarm path  x -> Goertzel resonator bank (piezo 2.8-3.6 kHz, 520 Hz square + harmonics)
             -> tonal on/off track -> T-3 temporal pattern matcher (ISO 8201)
+Knock path  band powers -> spectral flux -> impulse peaks -> rhythm check
 """
 import numpy as np
 from scipy import ndimage, signal

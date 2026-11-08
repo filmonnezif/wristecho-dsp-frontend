@@ -108,3 +108,4 @@ def test_knock_rhythm():
     one = 0.002 * rng.standard_normal(6 * C.SR).astype(np.float32)
     one[32000:32400] += 0.3 * rng.standard_normal(400) * np.exp(-np.arange(400) / 60)
     assert not frontend.knock_times(frontend.onset_strength(frontend.band_power(one)[1]), 8, 2)
+
