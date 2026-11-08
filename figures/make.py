@@ -168,7 +168,7 @@ def curve():
         pts = sorted(imp[clf].items(), key=lambda kv: float(kv[0]))
         ax.plot([v[mode]["fa_per_hour_events"] for _, v in pts], [100 * v[mode]["recall"] for _, v in pts], marker=mk, ms=3,
                 lw=1, ls=ls, color=col, label=lab)
-    ax.plot(f0["fa_per_hour_events"], 100 * f0["recall"], "*", ms=9, color="k", label="today's app (YAMNet, 0.30)")
+    ax.plot(f0["fa_per_hour_events"], 100 * f0["recall"], "*", ms=9, color="k", label="deployed rule (YAMNet, 0.30)")
     ax.set(xscale="log", xlabel="false alarms per hour (event streams)", ylabel="recall, 480 test events (%)", ylim=(20, 75))
     ax.legend(fontsize=5.5, loc="lower right")
     save(fig, "fig_curve")
@@ -187,9 +187,9 @@ def transfer():
         axs[0].plot([float(b) for b in bs], [100 * imp[clf][b]["full"]["recall"] for b in bs], marker=mk, color=col, label=lab)
         axs[1].plot([float(b) for b in bs], [fin[f"{clf}@{b}"]["sins_all"]["final_per_h"] for b in bs], marker=mk, color=col, label=lab)
     any_sys = next(v for k, v in fin.items() if "@" in k)
-    axs[1].axhline(any_sys["sins_all"]["app_per_h"], color="k", ls="--", lw=0.8, label="today's app")
+    axs[1].axhline(any_sys["sins_all"]["app_per_h"], color="k", ls="--", lw=0.8, label="deployed rule")
     axs[0].axhline(100 * json.load(open(os.path.join(C.RESULTS, "results.json")))["frontends"]["F0"]["recall"], color="k", ls="--",
-                   lw=0.8, label="today's app")
+                   lw=0.8, label="deployed rule")
     axs[0].set(xscale="log", xlabel="false-alarm budget (per hour per class)", ylabel="recall, test streams (%)")
     axs[1].set(xscale="log", xlabel="false-alarm budget (per hour per class)", ylabel="alerts per hour,\nreal home (SINS)")
     for ax in axs:

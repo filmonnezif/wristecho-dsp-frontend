@@ -15,21 +15,19 @@
 \maketitle
 
 \begin{abstract}
-Wearable sound-awareness devices for Deaf and hard-of-hearing people run a neural audio classifier on every half
-second of microphone input, which costs energy, and a general-purpose classifier misses or confuses the few sounds
-that matter. We combine a classical signal-processing front end with an adapted classifier for five alert classes
-(fire/smoke alarm, siren, car horn, baby crying, door). A Butterworth high-pass filter, short-time band energies and
-a fast and a slow minimum-tracking noise floor wake the classifier only when a new sound starts; a Goertzel resonator
-bank with a temporal-pattern matcher detects standard alarm tones; a veto removes the classifier's typical
-siren/fire-alarm confusion. The classifier is a small head trained on frozen embeddings of YAMNet or the mobile
-EfficientAT-mn10, with per-class score smoothing and thresholds set under a false-alarm budget on tuning data only. On
-8\,h of test streams (480 real and standard alarm events in six unseen environments) the system matches the recall of
-the deployed always-on YAMNet (44\,\% vs.\ 42\,\%) with ten times fewer false alarms (1.8 vs.\ 16.8 per hour), detects
-13 points more than YAMNet at the same false-alarm rate ($p<10^{-7}$), and runs the classifier 7\,\% of the time in
-quiet audio. Looser budgets reach 62\,\% recall on the benchmark, but on naturally recorded home audio they multiply
-false alerts by ten: only the strictest setting transfers, where the system raises fewer false alerts in a real home
-(0.36 vs.\ 0.55 per hour) and almost no fire alarms on look-alike beeps (0--2\,\% vs.\ 4--12\,\%). We argue that
-benchmark-tuned sound alert systems must be validated on real audio before deployment.
+Wearable sound-awareness devices for Deaf and hard-of-hearing people run a neural classifier on every half second of
+audio, which costs energy, and a general-purpose classifier misses or confuses the few sounds that matter. We combine a
+classical signal-processing front end with an adapted classifier for five alert classes: fire/smoke alarm, siren, car
+horn, baby crying and door. Short-time band energies with a fast and a slow noise floor wake the classifier only when a
+new sound starts; a Goertzel resonator bank with a temporal-pattern matcher detects standard alarm tones; a small head
+on frozen embeddings of a mobile audio network (EfficientAT-mn10), with per-class smoothing and thresholds set under a
+false-alarm budget, replaces the classifier's generic labels. On test streams from six unseen environments, the system
+matches the recall of a deployed always-on YAMNet rule (44\,\% vs.\ 42\,\%) with a tenth of its false alarms, detects 13
+points more than YAMNet at the same false-alarm rate, and keeps the classifier asleep 93\,\% of the time in quiet audio.
+Tuning for more benchmark recall does not carry over to real homes: settings that reach 62\,\% on the benchmark raise ten
+times more false alerts on naturally recorded home audio. Only the strictest setting transfers, with fewer false alerts in
+a real home than the deployed rule and almost no alarms on look-alike beeps. Sound alert systems should be validated on
+real home audio before deployment.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -59,7 +57,7 @@ a fixed level threshold does not.
 EfficientAT-mn10~\cite{schmid2023efficientat}), trained on public data with strict separation of uploaders and recordings
 from the test set, with per-class score choice, temporal smoothing and thresholds set under a false-alarm budget.
 \item A recall--false-alarm evaluation on 480 test events in six unseen environments: at every false-alarm rate the
-system detects 12--14 points more than YAMNet at the same false-alarm rate; at the strictest budget it matches the deployed app's recall with ten
+system detects 12--14 points more than YAMNet at the same false-alarm rate; at the strictest budget it matches the deployed rule's recall with ten
 times fewer false alarms.
 \item Evidence of a transfer gap: operating points tuned on mixed benchmark streams raise up to ten times more false
 alerts on naturally recorded home audio (SINS, DESED, real look-alike beeps); only the strictest one transfers.
@@ -88,7 +86,7 @@ false-alarm budget, and test whether the budget holds on real audio.
 \centering\resizebox{0.95\textwidth}{!}{\input{fig_block.tex}}
 \caption{The system. The gate path wakes the classifier, which reads the last 0.975\,s from the ring buffer; the
 alarm path raises alerts by itself; all alerts pass one alert rule. Dashed: the knock path, evaluated with stock YAMNet
-but not part of the final system (Sec.~\ref{sec:knock}).}\label{fig:block}
+but not part of the final system (Sec.~III-C).}\label{fig:block}
 \end{figure*}
 \subsection{Signals, classes and alert rule}
 Audio is sampled at $f_s=16$\,kHz. The Nyquist frequency of 8\,kHz covers the piezo smoke-alarm band (about
@@ -96,7 +94,8 @@ Audio is sampled at $f_s=16$\,kHz. The Nyquist frequency of 8\,kHz covers the pi
 window is 0.975\,s, every 0.5\,s. Five alert classes, in priority order: fire/smoke alarm, siren, car horn, baby crying,
 door (knock or doorbell, one alert). A class fires when its score reaches its threshold in $N$ classified windows in a
 row ($N=2$ for alarm, siren and baby, 1 for horn and door; a run survives skipped windows if classified windows are at
-most 2\,s apart), with a 20\,s cooldown; the most urgent class wins.
+most 2\,s apart), with a 20\,s cooldown; the most urgent class wins. With YAMNet's own scores and a threshold of 0.30 for
+every class, this is the alert rule of the authors' deployed wearable prototype; we call it \emph{the deployed rule}.
 
 \begin{figure*}[t]
 \centering\fig[0.95\textwidth]{fig_filters}
@@ -145,11 +144,13 @@ tails. After closing 100\,ms dropouts, an alarm is declared on three pulses of 0
 (Sec.~\ref{sec:real}).
 
 \textbf{Siren veto.} YAMNet also scores \emph{Alarm} on sirens, and the alarm class has priority; a classifier alarm is
-therefore accepted only when its score exceeds the siren score in the same window.
+therefore accepted only when its score exceeds the siren score in the same window. The veto only blocks alarm alerts:
+it never removes a siren alert, and by stopping a false alarm from taking priority it can only add siren detections.
 
-\textbf{Knock path.}\label{sec:knock} An impulse-rhythm detector (spectral flux peaks with regular inter-onset intervals) was searched on
-tuning data like every other setting. It raises stock YAMNet's door recall at strict budgets (3\,\% to 19\,\% at $b=0.1$) but
-adds no detection to the trained classifier at equal false alarms, so the final system does not use it.
+A third DSP path, an impulse-rhythm knock detector, was searched on tuning data like every other setting; it helps stock
+YAMNet but not the trained classifier, so the final system does not use it.\footnote{\label{sec:knock}Spectral-flux peaks
+with regular inter-onset intervals (0.12--0.6\,s). It raises stock YAMNet's door recall at $b=0.1$ from 3\,\% to 19\,\%
+but adds no detection to the trained classifier at equal false alarms.}
 
 \subsection{Adapted classifier}
 \textbf{Backbones.} YAMNet (MobileNetV1, 521 classes, $M_Y=\num{70744064}$ multiply-accumulates (MACs) per window, counted
@@ -221,14 +222,14 @@ dataset's annotators.
 \subsection{Recall and false alarms on the benchmark}
 \begin{table*}[t]
 \centering\caption{Test results (6 unseen environments, 480 targets, 96 per class). Thresholds set on tuning data under a
-false-alarm budget $b$ (per hour per class); ``app'' is the deployed rule (YAMNet, 0.30). FA/h on event / idle streams;
+false-alarm budget $b$ (per hour per class); ``deployed rule'' is YAMNet with 0.30 thresholds (Sec.~III-A). FA/h on event / idle streams;
 compute relative to always-on YAMNet in idle streams; ``pred.'' = recall on the predominant-target subset.}\label{tab:main}
 \setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{lrrrrrrrrrrr}
 \toprule
 System & $b$ & Recall (\%) [95\,\% CI] & Alarm & Siren & Horn & Baby & Door & FA/h ev. & FA/h idle & Compute (\%) & Pred. (\%) \\
 \midrule
-YAMNet always on (app) & -- & 42.3 [37.5, 47.1] & 31 & 58 & 33 & 67 & 22 & 16.8 & 0.25 & 100 & 49.4 \\
+Deployed rule (YAMNet, always on) & -- & 42.3 [37.5, 47.1] & 31 & 58 & 33 & 67 & 22 & 16.8 & 0.25 & 100 & 49.4 \\
 YAMNet always on, tuned & 0.3 & 31.0 [27.1, 35.0] & 10 & 30 & 16 & 81 & 18 & 1.8 & 0 & 100 & 38.8 \\
 YAMNet + gate + alarm DSP + veto & 0.1 & 36.9 [33.3, 40.6] & 50 & 30 & 8 & 77 & 19 & 1.8 & 0 & 7.3 & 47.1 \\
 YAMNet head + gate + DSP & 0.1 & 36.9 [33.5, 40.2] & 52 & 27 & 14 & 77 & 15 & 1.8 & 0 & 5.4 & 47.7 \\
@@ -244,14 +245,14 @@ most of its recall for fewer false alarms (31\,\% at 1.8 per hour). The DSP alar
 misses (alarm recall 7\,\% to 50\,\% at $b=0.1$) and the gate lets YAMNet sleep 93\,\% of the time in quiet audio. Adapting the
 classifier adds most for the classes its stock labels describe poorly: with the mn10 head, door recall rises from 18\,\%
 to 43\,\% and horn from 16\,\% to 25\,\%. At the same tuning false-alarm rate as tuned YAMNet, the system detects 13 points
-more (98 vs.\ 35 events detected by only one of the two, $p=4\cdot10^{-8}$); against the deployed app, recall is the same
+more (98 vs.\ 35 events detected by only one of the two, $p=4\cdot10^{-8}$); against the deployed rule, recall is the same
 (44\,\% vs.\ 42\,\%, $p=0.51$) with ten times fewer false alarms. At matched false-alarm rates the adapted system lies 12--14 points above YAMNet along the whole curve, and looser budgets reach 62\,\% (72\,\% on the predominant subset) at 10 false alarms per hour.
 The strict budget costs sirens most (21\,\%): their head scores rarely clear the very high thresholds the budget demands.
 
 \begin{figure}[t]
 \centering\fig{fig_curve}
 \caption{Recall against false alarms per hour on the test event streams, for false-alarm budgets of 0.1--3 per hour per
-class set on tuning data. Star: the deployed app.}\label{fig:curve}
+class set on tuning data. Star: the deployed rule.}\label{fig:curve}
 \end{figure}
 
 \textbf{Which classifier.} Table~\ref{tab:ap} compares backbones by window-level average precision on the test streams.
@@ -313,12 +314,12 @@ Two floors, $\delta=6$\,dB (selected) & \textbf{43.8} & \textbf{29.9} & \textbf{
 
 \subsection{Transfer to naturally recorded audio}\label{sec:transfer}
 \begin{table}[t]
-\centering\caption{Real recordings: today's app vs.\ the mn10 system at three budgets. Alarm rows: share raising a fire
+\centering\caption{Real recordings: the deployed rule vs.\ the mn10 system at three budgets. Alarm rows: share raising a fire
 alarm (\%), clean / 10\,dB / 0\,dB. $\downarrow$: lower is better.}\label{tab:real}
 \small\setlength{\tabcolsep}{2pt}
 \begin{tabular}{lcccc}
 \toprule
- & App & $b=0.1$ & $b=0.3$ & $b=1$ \\
+ & Deployed & $b=0.1$ & $b=0.3$ & $b=1$ \\
 \midrule
 Smoke alarms (23) & 43/43/22 & 39/35/26 & 43/39/30 & 70/61/57 \\
 Bells, horns (13) & 62/62/31 & 15/23/8 & 46/38/15 & 54/54/46 \\
@@ -333,12 +334,12 @@ DESED wake (\%) & -- & 94 & 95 & 98 \\
 \end{table}
 
 The benchmark budget does not transfer (Table~\ref{tab:real}, Fig.~\ref{fig:transfer}). At $b=1$, the operating point
-with the best benchmark recall, the system finds many more real smoke alarms than the app (57\,\% vs.\ 22\,\% at 0\,dB) but
+with the best benchmark recall, the system finds many more real smoke alarms than the deployed rule (57\,\% vs.\ 22\,\% at 0\,dB) but
 raises a fire alarm on a third of real look-alike beeps and on almost every synthetic look-alike, and ten times more false
 alerts in a real home (5.3 vs.\ 0.55 per hour; 11.7 with the TV on, 16.9 during social activity). The streams' backgrounds and
 distractors do not contain enough of what a home contains: television, conversation, appliance beeps. Only $b=0.1$ keeps
-real-home false alerts at or below the app's, and it nearly eliminates look-alike alarms; its smoke-alarm detection
-equals the app's, and it detects 520\,Hz alarms the app never does (95\,\% vs.\ 0\,\%). Its cost is fire bells and horns,
+real-home false alerts at or below the deployed rule's, and it nearly eliminates look-alike alarms; its smoke-alarm
+detection equals the deployed rule's, and it detects 520\,Hz alarms the deployed rule never does (95\,\% vs.\ 0\,\%). Its cost is fire bells and horns,
 which fall from 31--62\,\% to 8--23\,\%. We recommend $b=0.1$; because this choice uses SINS, the SINS figure for it is not an
 independent test. A per-class budget does not rescue sirens: sharing the same total (0.5 false alarms per hour) between the
 classes where it buys most tuning recall moved it to horns and doors (test recall 45.8\,\%, sirens unchanged at 21\,\%) and
@@ -347,7 +348,7 @@ raised real-home alerts to 1.27 per hour. The siren limit lies in the head's sco
 \begin{figure*}[t]
 \centering\fig[0.9\textwidth]{fig_transfer}
 \caption{The transfer gap. Left: recall on the test streams at each false-alarm budget. Right: alerts per hour in 5.5\,h of a
-real home (SINS), where every alert is false. Dashed: the deployed app.}\label{fig:transfer}
+real home (SINS), where every alert is false. Dashed: the deployed rule.}\label{fig:transfer}
 \end{figure*}
 
 \textbf{Compute in real homes.} With the recommended system the classifier runs under 1\,\% of the time in an empty home,
