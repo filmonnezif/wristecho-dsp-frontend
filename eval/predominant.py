@@ -42,7 +42,7 @@ def main():
     p = os.path.join(C.RESULTS, "improve.json")
     if os.path.exists(p):
         curve = json.load(open(p))["curve"]
-        for clf in [k for k in ("stock", "best_yamnet", "best") if k in curve]:
+        for clf in curve:
             for b, pt in curve[clf].items():
                 for mode in ("always-on", "full"):
                     line(f"{clf} @{b} FA/h {mode} (FA/h {pt[mode]['fa_per_hour_events']:.1f})", pt[mode]["hits"])

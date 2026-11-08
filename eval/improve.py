@@ -123,17 +123,23 @@ def main():
     print(f"  tuning recall per category at {C.FA_BUDGET_PER_H} FA/h (per candidate):")
     for v, thr, rec in cand:
         print(f"    {v:8s} " + " ".join(f"{c.lower()} {rec[c]:.3f}@{thr[c]:g}" for c in C.ORDER))
-    yam = [r for r in cand if ":" not in r[0]]
-    choice_y = {c: max(yam, key=lambda r: (r[2][c], -variants.index(r[0])))[0] for c in C.ORDER}
-    choice = {c: max(cand, key=lambda r: (r[2][c], -variants.index(r[0])))[0] for c in C.ORDER}
-    print(f"  chosen per category (YAMNet only): {choice_y}", flush=True)
-    print(f"  chosen per category (any backbone): {choice}", flush=True)
+    # per category, the best candidate within each set: YAMNet only, one EfficientAT model only (one
+    # network on the watch), or any backbone (may need two networks awake)
+    sets = {"best_yamnet": lambda v: ":" not in v, "best_mn10": lambda v: v.startswith("mn10_as:"),
+            "best_mn04": lambda v: v.startswith("mn04_as:"), "best": lambda v: True}
+    choices = {}
+    for name, ok in sets.items():
+        pool_c = [r for r in cand if ok(r[0])]
+        if pool_c:
+            choices[name] = {c: max(pool_c, key=lambda r: (r[2][c], -variants.index(r[0])))[0] for c in C.ORDER}
+            print(f"  chosen per category ({name}): {choices[name]}", flush=True)
+    choice, choice_y = choices["best"], choices["best_yamnet"]
     for s in DATA:
-        s["cat"]["best_yamnet"] = np.stack([s["cat"][choice_y[c]][:, j] for j, c in enumerate(C.ORDER)], axis=1)
-        s["cat"]["best"] = np.stack([s["cat"][choice[c]][:, j] for j, c in enumerate(C.ORDER)], axis=1)
+        for name, ch in choices.items():
+            s["cat"][name] = np.stack([s["cat"][ch[c]][:, j] for j, c in enumerate(C.ORDER)], axis=1)
     cost = [macs_per_window(), frontend.gate_ops_per_window(), frontend.alarm_ops_per_window(frontend.chosen_alarm()),
             frontend.knock_ops_per_window(), head.macs()]
-    jobs = [(clf, b, cost) for clf in ("stock", "best_yamnet", "best") for b in CURVE_BUDGETS]
+    jobs = [(clf, b, cost) for clf in ["stock"] + list(choices) for b in CURVE_BUDGETS]
     with Pool(min(len(jobs), C.WORKERS)) as pool:
         pts = pool.map(point, jobs)
     curve = {}
@@ -146,11 +152,11 @@ def main():
         for mode in ("always-on", "full"):
             tests[f"best {mode} vs stock always-on @{b}"] = E.mcnemar(np.array(bb[mode]["hits"]), np.array(sb["always-on"]["hits"]))
     json.dump(dict(candidates=[dict(variant=v, thresholds=t, tune_recall=r) for v, t, r in cand], choice=choice,
-                   choice_yamnet=choice_y,
+                   choice_yamnet=choice_y, choices=choices,
                    curve=curve, tests=tests), open(os.path.join(C.RESULTS, "improve.json"), "w"), indent=1)
     print(f"\n  {'classifier':10s} {'FA/h budget':>11s} {'mode':>9s} {'recall':>7s} {'>=5dB':>6s} " +
           " ".join(f"{c[:5].lower():>6s}" for c in C.ORDER) + f" {'FA/h ev':>7s} {'FA/h id':>7s} {'duty id':>7s}")
-    for clf in ("stock", "best_yamnet", "best"):
+    for clf in ["stock"] + list(choices):
         for b in CURVE_BUDGETS:
             for mode in ("always-on", "full"):
                 r = curve[clf][str(b)][mode]
