@@ -104,7 +104,7 @@ def point(arg):
                          by_snr={k: v["recall"] for k, v in r["by_snr"].items()},
                          fa_per_hour_events=r["fa_per_hour_events"], fa_per_hour_idle=r["fa_per_hour_idle"],
                          duty_idle=r["duty_idle"], duty_events=r["duty_events"], compute_idle=r["compute_idle"],
-                         name=r["name"], hits=r["hits"])
+                         name=r["name"], hits=r["hits"], frontend=fe)
     return clf, budget, thr, out
 
 

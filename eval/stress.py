@@ -59,6 +59,22 @@ def alarm(seed, f0, square=False, on=0.5, off=0.5, n_on=3, pause=1.5, cycles=3, 
     return signal.fftconvolve(dry, rir)[:len(dry)].astype(np.float32)
 
 
+def scene(name, seed):
+    """12 s of a test-environment background at -40 dBFS with variant `name` from 2 s at 5 dB SNR."""
+    _, params = VARIANTS[name]
+    rng = np.random.default_rng(seed + 1000)
+    env = C.TEST_ENVS[seed % len(C.TEST_ENVS)]
+    bg = streams.load(os.path.join(C.DATA, "demand", env, "ch01.wav"))
+    i = int(rng.integers(0, len(bg) - int(DUR * C.SR)))
+    bg = bg[i:i + int(DUR * C.SR)]
+    bg = bg * 10 ** (-40 / 20) / (np.sqrt(np.mean(bg ** 2)) + 1e-9)
+    a = alarm(seed, **params)
+    _, _, rms = streams.active(a)
+    x = bg.copy()
+    x[int(ONSET * C.SR):] += a / rms * 10 ** (-40 / 20) * 10 ** (SNR / 20)
+    return x.astype(np.float32)
+
+
 def job(arg):
     name, seed = arg
     expected, params = VARIANTS[name]
