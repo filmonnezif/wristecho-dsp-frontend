@@ -110,7 +110,7 @@ def filters():
     w, h = signal.sosfreqz(sos, worN=4096, fs=C.SR)
     axs[0].semilogx(w[1:], 20 * np.log10(np.abs(h[1:]) + 1e-12), color=COL["F3"])
     axs[0].axvline(C.HPF_HZ, ls="--", c="k", lw=0.7)
-    axs[0].set(xlim=(10, 8000), ylim=(-60, 3), xlabel="Hz", ylabel="dB", title="HPF: Butterworth, 2nd order, 100 Hz")
+    axs[0].set(xlim=(10, 8000), ylim=(-60, 3), xlabel="Hz", ylabel="dB", title="High-pass filter\n(Butterworth, order 2, 100 Hz)")
     z, p, _ = signal.sos2zpk(sos)
     t = np.linspace(0, 2 * np.pi, 400)
     axs[1].plot(np.cos(t), np.sin(t), "k", lw=0.5)
@@ -118,7 +118,7 @@ def filters():
     axs[1].plot(p.real, p.imag, "x", c=COL["F3"], label="poles (HPF)")
     wg = 2 * np.pi * 3100 / C.SR
     axs[1].plot(np.cos([wg, -wg]), np.sin([wg, -wg]), "x", c=COL["F4"], label="poles (Goertzel 3.1 kHz)")
-    axs[1].set(aspect="equal", xlim=(-1.3, 1.3), ylim=(-1.3, 1.3), title="pole-zero plot")
+    axs[1].set(aspect="equal", xlim=(-1.3, 1.3), ylim=(-1.3, 1.3), title="Pole-zero plot")
     axs[1].legend(fontsize=5, loc="lower left")
     f = np.linspace(2000, 4200, 2000)
     n = np.arange(C.FRAME)
@@ -126,7 +126,7 @@ def filters():
     for f0 in (3000, 3100, 3200):
         resp = [abs(np.sum(win * np.exp(1j * 2 * np.pi * (ff - f0) * n / C.SR))) for ff in f]
         axs[2].plot(f, 20 * np.log10(np.array(resp) / max(resp)), lw=0.8)
-    axs[2].set(ylim=(-60, 3), xlabel="Hz", ylabel="dB", title="Goertzel probes (N = 320, Hann)")
+    axs[2].set(ylim=(-60, 3), xlabel="Hz", ylabel="dB", title="Goertzel probes\n(N = 320, Hann window)")
     save(fig, "fig_filters")
 
 

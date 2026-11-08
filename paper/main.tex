@@ -87,7 +87,8 @@ false-alarm budget, and test whether the budget holds on real audio.
 \begin{figure*}[t]
 \centering\resizebox{0.95\textwidth}{!}{\input{fig_block.tex}}
 \caption{The system. The gate path wakes the classifier, which reads the last 0.975\,s from the ring buffer; the
-alarm path raises alerts by itself; all alerts pass one alert rule.}\label{fig:block}
+alarm path raises alerts by itself; all alerts pass one alert rule. Dashed: the knock path, evaluated with stock YAMNet
+but not part of the final system (Sec.~\ref{sec:knock}).}\label{fig:block}
 \end{figure*}
 \subsection{Signals, classes and alert rule}
 Audio is sampled at $f_s=16$\,kHz. The Nyquist frequency of 8\,kHz covers the piezo smoke-alarm band (about
@@ -146,15 +147,17 @@ tails. After closing 100\,ms dropouts, an alarm is declared on three pulses of 0
 \textbf{Siren veto.} YAMNet also scores \emph{Alarm} on sirens, and the alarm class has priority; a classifier alarm is
 therefore accepted only when its score exceeds the siren score in the same window.
 
-\textbf{Knock path.} An impulse-rhythm detector (spectral flux peaks with regular inter-onset intervals) was searched on
+\textbf{Knock path.}\label{sec:knock} An impulse-rhythm detector (spectral flux peaks with regular inter-onset intervals) was searched on
 tuning data like every other setting. It raises stock YAMNet's door recall at strict budgets (3\,\% to 19\,\% at $b=0.1$) but
 adds no detection to the trained classifier at equal false alarms, so the final system does not use it.
 
 \subsection{Adapted classifier}
 \textbf{Backbones.} YAMNet (MobileNetV1, 521 classes, $M_Y=\num{70744064}$ multiply-accumulates (MACs) per window, counted
-from its convolution and dense layers) and EfficientAT-mn10 (MobileNetV3, 527 classes, 32\,kHz input,
-\num{62897600}\,MACs per window), both frozen. A backbone's own score for a class is the maximum over that class's
-labels.
+from its convolution and dense layers) and EfficientAT-mn10 (MobileNetV3, 527 classes, \num{62897600}\,MACs per window), both frozen. mn10 was trained on
+32\,kHz audio; the 0.975\,s window from the 16\,kHz buffer is upsampled by 2 (polyphase) before its log-mel front end,
+so its mel bands above 8\,kHz carry no signal (an input mismatch the head partly absorbs). Its cost is set by the 98 mel
+frames per window, not by the sample rate, so running it on 16\,kHz audio would not halve it. A backbone's own score for
+a class is the maximum over that class's labels.
 
 \textbf{Head.} Multinomial logistic regression or a one-hidden-layer MLP on the standardised embedding (1024-d for YAMNet,
 960-d for mn10), optionally with the logits of the backbone's own class scores appended, over the five classes plus
@@ -253,9 +256,9 @@ class set on tuning data. Star: the deployed app.}\label{fig:curve}
 
 \textbf{Which classifier.} Table~\ref{tab:ap} compares backbones by window-level average precision on the test streams.
 A head on YAMNet's embedding helps alarms and doors but not sirens and horns, which YAMNet's own labels, trained on far
-more data, already separate. The mn10 embedding gives the best head on every class but horn. mn10's own label scores
-saturated in our pipeline (near 1 for every class), so it is used only through its head; mn04 (12.7\,M MACs) was weaker
-and is not used.
+more data, already separate. The mn10 embedding gives the best head on every class but horn. mn10 is evaluated only
+through its trained head: in our pipeline its own label scores were near 1 for every class, while mn04 with the same
+front end behaved normally; we did not resolve this. mn04 (12.7\,M MACs) gave a weaker head and is not used.
 
 \begin{table}[t]
 \centering\caption{Window-level average precision on the test streams: backbone's own labels / trained head.}\label{tab:ap}
@@ -337,7 +340,9 @@ distractors do not contain enough of what a home contains: television, conversat
 real-home false alerts at or below the app's, and it nearly eliminates look-alike alarms; its smoke-alarm detection
 equals the app's, and it detects 520\,Hz alarms the app never does (95\,\% vs.\ 0\,\%). Its cost is fire bells and horns,
 which fall from 31--62\,\% to 8--23\,\%. We recommend $b=0.1$; because this choice uses SINS, the SINS figure for it is not an
-independent test.
+independent test. A per-class budget does not rescue sirens: sharing the same total (0.5 false alarms per hour) between the
+classes where it buys most tuning recall moved it to horns and doors (test recall 45.8\,\%, sirens unchanged at 21\,\%) and
+raised real-home alerts to 1.27 per hour. The siren limit lies in the head's scores, not in the budget.
 
 \begin{figure*}[t]
 \centering\fig[0.9\textwidth]{fig_transfer}

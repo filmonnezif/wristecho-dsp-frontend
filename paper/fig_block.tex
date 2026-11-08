@@ -12,7 +12,7 @@
 % alarm and knock paths
 \node[dsp, below right=2mm and 4mm of buf] (goe) {Goertzel bank\\2.8--3.6\,kHz, 520\,Hz};
 \node[dsp, right=of goe] (t3) {tone track\\T-3 pattern};
-\node[dsp, below=5mm of goe.south -| fft] (knock) {impulse rhythm\\(knocks)};
+\node[dsp, dashed, below=5mm of goe.south -| fft] (knock) {impulse rhythm (knocks)\\YAMNet only, not in final};
 % classifier and decision
 \node[nn, right=6mm of gate] (yam) {EfficientAT + head\\(only when awake)};
 \node[dec, below=6mm of yam] (rule) {alert rule\\smoothing, thresholds,\\$N$ windows, siren veto};
@@ -26,6 +26,6 @@
 \draw[->] (fft.south) -- (knock.north);
 \draw[->] (yam) -- node[right]{scores} (rule);
 \draw[->] (t3.east) -- (rule.west);
-\draw[->] (knock.east) -| (rule.south);
+\draw[->, dashed] (knock.east) -| (rule.south);
 \draw[->] (rule) -- (out);
 \end{tikzpicture}
