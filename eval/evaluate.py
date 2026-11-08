@@ -212,7 +212,7 @@ def tune_thresholds(tune, clf="stock", budget=None):
     h = hours(tune, "idle") + hours(tune, "events")
     best = {}
     for thr in C.HEAD_THRESHOLDS[::-1]:  # from strict to loose: keep the last one within budget
-        fe = dict(kind="F0", clf=clf, thresholds={c: float(thr) for c in C.ORDER})
+        fe = dict(kind="F0", clf=clf, veto=True, thresholds={c: float(thr) for c in C.ORDER})
         sc = score(tune, run(fe, tune))
         for c in C.ORDER:
             fa = sum(v for (k, cc), v in sc["fa"].items() if cc == c) / h
@@ -361,7 +361,7 @@ def main():
     print(f"  tuned YAMNet thresholds ({C.FA_BUDGET_PER_H} FA/h per category on tuning): {thresholds}", flush=True)
     if "head" in clfs:
         print(f"  head thresholds: {head.load()['thresholds']}", flush=True)
-    fes = {"F0": dict(kind="F0"), "F0*": dict(kind="F0", thresholds=thresholds),
+    fes = {"F0": dict(kind="F0"), "F0*": dict(kind="F0", veto=True, thresholds=thresholds),
            "F0+DSP": dict(kind="F0", alarm="v4", veto=True)}
     for b in C.BUDGETS:
         tag = f"@{100 * b:g}%"
@@ -380,7 +380,7 @@ def main():
         if knock[clf]["chosen"]:
             fes[f"{a} knock@5%"] = dict(fes[f"{a}@5%"], knock=knock[clf]["chosen"])
     if "head" in clfs:
-        fes["H0"] = dict(kind="F0", clf="head")
+        fes["H0"] = dict(kind="F0", clf="head", veto=True)
         fes["H0+DSP"] = dict(kind="F0", clf="head", alarm="v4", veto=True, **({"knock": knock["head"]["chosen"]}
                                                                               if knock.get("head", {}).get("chosen") else {}))
     if knock.get("stock", {}).get("chosen"):

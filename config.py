@@ -68,7 +68,7 @@ LABEL_DB, LABEL_MIN_S = 30.0, 0.06
 HEAD_MODELS = {"logreg": dict(C=[0.001, 0.01, 0.1]), "mlp": dict(hidden=[128, 256], alpha=[1e-4, 1e-3]),
                "logreg+yamnet": dict(C=[0.001, 0.01, 0.1]), "mlp+yamnet": dict(hidden=[128, 256], alpha=[1e-4, 1e-3])}
 FA_BUDGET_PER_H = 0.3  # per category: thresholds of the head (and tuned YAMNet) keep tuning FA/h below this
-HEAD_THRESHOLDS = np.round(np.arange(0.05, 0.951, 0.025), 3)
+HEAD_THRESHOLDS = np.r_[np.round(np.arange(0.05, 0.951, 0.025), 3), [0.975, 0.99, 0.995, 0.998, 0.999]]
 COOLDOWN_S = 20.0
 HIT_MARGIN_S = 1.0  # a detection counts for an event from its onset to 1 s after it ends
 
