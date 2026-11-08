@@ -32,7 +32,7 @@ fig = uifigure('Name', 'Listen Before You Classify - live demo', 'Position', [60
 g = uigridlayout(fig, [1 2], 'ColumnWidth', {300, '1x'}, 'Padding', [10 10 10 10]);
 
 % --- Controls -------------------------------------------------------------------------------
-c = uigridlayout(g, [22 1], 'RowHeight', repmat({'fit'}, 1, 22), 'RowSpacing', 5);
+c = uigridlayout(g, [24 1], 'RowHeight', repmat({'fit'}, 1, 24), 'RowSpacing', 5);
 uilabel(c, 'Text', 'Sound', 'FontWeight', 'bold');
 names = demoSounds();
 ddSound = uidropdown(c, 'Items', names, 'Value', names{2});
@@ -40,6 +40,9 @@ uilabel(c, 'Text', 'Room noise (SNR of the sound, dB)');
 slSnr = uislider(c, 'Limits', [-5 40], 'Value', 10, 'MajorTicks', -5:5:40);
 uilabel(c, 'Text', 'Classifier', 'FontWeight', 'bold');
 ddClf = uidropdown(c, 'Items', {'EfficientAT + head (paper)', 'YAMNet (today''s app)'}, 'Value', 'EfficientAT + head (paper)');
+uilabel(c, 'Text', 'False-alarm budget (EfficientAT; per hour per class)');
+ddBudget = uidropdown(c, 'Items', {'0.1: strict (paper''s choice)', '0.3', '1: relaxed (more recall, more false alerts)'}, ...
+    'ItemsData', 1:3, 'Value', 1);
 cbGate = uicheckbox(c, 'Text', 'Wake-up gate on (off = classifier on every window)', 'Value', true);
 cbTwo = uicheckbox(c, 'Text', 'Two noise floors (catches sounds that swell slowly)', 'Value', true);
 uilabel(c, 'Text', 'Gate threshold \Delta (dB above the noise floor)', 'Interpreter', 'tex');
@@ -66,13 +69,21 @@ axYam = uiaxes(p); title(axYam, 'Class scores (dots: thresholds)');
 bPlay.ButtonPushedFcn = @(~, ~) onPlay();
 bStop.ButtonPushedFcn = @(~, ~) setStop();
 ddClf.ValueChangedFcn = @(~, ~) onClf();
+ddBudget.ValueChangedFcn = @(~, ~) onBudget();
 
     function setStop()
         S.stop = true;
     end
 
-    function onClf()  % each classifier has its own calibrated gate threshold
+    function onClf()  % each classifier (and budget) has its own calibrated gate threshold
         if startsWith(ddClf.Value, 'EfficientAT'), slDelta.Value = P.final.gate_delta; else, slDelta.Value = P.deltaYamnet; end
+    end
+
+    function onBudget()  % thresholds and gate settings chosen on tuning data at that budget (paper, Table I)
+        i = ddBudget.Value;
+        P.final.thresholds = P.budgets.thresholds(i, :);
+        P.final.gate_delta = P.budgets.gate_delta(i); P.final.gate_hang = P.budgets.gate_hang(i);
+        onClf();
     end
 
     function onPlay()
@@ -157,6 +168,7 @@ P = struct('frame', 320, 'nfft', 512, 'hop', 8000, 'win', 15600, 'nbands', 16, '
 P.cats = {'Alarm', 'Siren', 'Car horn', 'Baby crying', 'Door'};
 P.need = [2 2 1 2 1];
 P.final = load(fullfile(fileparts(mfilename('fullpath')), 'model', 'final_system.mat'));
+P.budgets = load(fullfile(fileparts(mfilename('fullpath')), 'model', 'budgets.mat'));
 P.delta = P.final.gate_delta;
 end
 
