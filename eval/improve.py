@@ -70,11 +70,16 @@ def tune_split():
 
 
 def candidate(v):
+    """Thresholds at the budget, and per category the tuning recall, or -1 if even the strictest
+    threshold exceeds the false-alarm budget (an overconfident score cannot be used)."""
     tune = tune_split()
     thr = E.tune_thresholds(tune, v)
     sc = E.score(tune, E.run(dict(kind="F0", clf=v, veto=True, thresholds=thr), tune))
     cats = np.array([r["category"] for r in sc["rows"]])
-    return v, thr, {c: float(sc["hits"][cats == c].mean()) for c in C.ORDER}
+    h = E.hours(tune, "idle") + E.hours(tune, "events")
+    fa = {c: sum(n for (_, cc), n in sc["fa"].items() if cc == c) / h for c in C.ORDER}
+    return v, thr, {c: float(sc["hits"][cats == c].mean()) if fa[c] <= C.FA_BUDGET_PER_H + 1e-9 else -1.0
+                    for c in C.ORDER}
 
 
 def point(arg):
