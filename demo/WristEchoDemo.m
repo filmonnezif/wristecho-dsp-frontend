@@ -1,9 +1,11 @@
-function WristEchoDemo(mode, extra)
+function varargout = WristEchoDemo(mode, extra)
 %WRISTECHODEMO Live demo of the paper's system ("Listen Before You Classify").
 %   WristEchoDemo            the app: pick a sound, set the room noise and the front end, press Play.
 %   WristEchoDemo('check')   runs every sound without the UI and prints what the system and today's app
 %                            (always-on YAMNet) report (WristEchoDemo('check', urls) adds recordings by URL).
 %   WristEchoDemo('selftest') checks the imported EfficientAT model against the Python export.
+%   api = WristEchoDemo('api') returns handles to defaults, frontEnd and makeScene, for experiments that
+%                            must run exactly the demo's front end (see experiments/).
 %   The app mixes the sound into room noise, runs the DSP front end and the classifier exactly as in the
 %   paper, and replays the result in real time: spectrogram, gate statistic vs. threshold, when the
 %   classifier is awake, Goertzel probe energies, the class scores and the alert.
@@ -16,6 +18,10 @@ function WristEchoDemo(mode, extra)
 %   downloaded once into tempdir (see demoSounds).
 
 fs = 16000;
+if nargin && strcmp(mode, 'api')
+    varargout{1} = struct('defaults', @defaults, 'frontEnd', @frontEnd, 'makeScene', @makeScene);
+    return
+end
 P = defaults();
 if nargin && strcmp(mode, 'selftest')
     selfTest();
