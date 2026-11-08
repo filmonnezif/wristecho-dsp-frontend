@@ -30,33 +30,46 @@ from eval import real_scenes as RS  # noqa: E402
 from eval import stress as ST  # noqa: E402
 from eval.improve import smooth  # noqa: E402
 
-SYSTEM, FINAL_BUDGET, MODEL = "best_mn10", "1.0", "mn10_as"
+# systems evaluated: (selection set, false-alarm budget); the first is the default "final" one
+SYSTEMS = [("best_mn10", "0.1"), ("best_mn10", "0.3"), ("best_mn10", "1.0"), ("best_yamnet", "0.1"), ("best_yamnet", "0.3"),
+           ("best_yamnet", "1.0")]
+MODEL = "mn10_as"
 CFG = None
 
 
-def settings():
+def settings(system, budget):
     imp = json.load(open(os.path.join(C.RESULTS, "improve.json")))
-    pt = imp["curve"][SYSTEM][FINAL_BUDGET]
-    return dict(choice=imp["choices"][SYSTEM], thresholds=pt["thresholds"], fe=pt["full"]["frontend"])
+    pt = imp["curve"][system][budget]
+    return dict(name=f"{system}@{budget}", choice=imp["choices"][system], thresholds=pt["thresholds"], fe=pt["full"]["frontend"])
 
 
-def final_cat(scores, emb, choice):
-    """Per-window category scores of the final classifier from mn10's outputs."""
-    h = head.load(head.path_for(MODEL))
-    base = {"stock": yamnet.category_scores(scores, head.labels_for(MODEL)), "head": head.category_scores(emb, scores, h)}
-    base["mean"] = base["stock"].copy()
-    base["mean"][:, :, 0] = (base["stock"][:, :, 0] + base["head"][:, :, 0]) / 2
-    out = np.zeros_like(base["head"])
-    for j, c in enumerate(C.ORDER):
-        src, k = choice[c].split(":")[1].split("/")
-        out[:, j] = smooth(base[src], int(k))[:, j]
+def bases(outs):
+    """Category scores per backbone and source: own labels, trained head, mean."""
+    out = {}
+    for bb, (scores, emb) in outs.items():
+        h = head.load(head.path_for(bb))
+        b = {"stock": yamnet.category_scores(scores, head.labels_for(bb)), "head": head.category_scores(emb, scores, h)}
+        b["mean"] = b["stock"].copy()
+        b["mean"][:, :, 0] = (b["stock"][:, :, 0] + b["head"][:, :, 0]) / 2
+        out[bb] = b
     return out
 
 
-def run_final(x, s, scores, emb):
-    """Alerts, gate mask and DSP alarms of the final system on audio x."""
+def final_cat(base, choice):
+    """Per-window category scores of a selected classifier (per category: backbone, source, smoothing)."""
+    out = np.zeros_like(base["yamnet"]["head"])
+    for j, c in enumerate(C.ORDER):
+        v = choice[c]
+        bb, v = (v.split(":") if ":" in v else ("yamnet", v))
+        src, k = v.split("/")
+        out[:, j] = smooth(base[bb][src], int(k))[:, j]
+    return out
+
+
+def run_final(x, s, base):
+    """Alerts and gate mask of a system on audio x."""
     fe = s["fe"]
-    cat = final_cat(scores, emb, s["choice"])
+    cat = final_cat(base, s["choice"])
     _, bands = frontend.band_power(x)
     m = RS.gate_mask(x, fe, bands)
     alarms = {"v4": [(t, "FIRE_ALARM") for t in frontend.alarm_times(x, cfg=CFG)]}
@@ -66,12 +79,13 @@ def run_final(x, s, scores, emb):
 
 
 def prep(item):
-    """CPU worker: the audio and today's app (stock YAMNet always on) for one test item."""
+    """CPU worker: the audio, YAMNet's outputs and today's app (stock YAMNet always on) for one item."""
     kind, key, x = item[0], item[1], item[2]
     if x is None:
         return None
-    app = yamnet.detect(yamnet.category_scores(yamnet.window_scores(x)), siren_veto=True)
-    return kind, key, x, app, item[3] if len(item) > 3 else None
+    scores, emb = yamnet.window_outputs(x)
+    app = yamnet.detect(yamnet.category_scores(scores), siren_veto=True)
+    return kind, key, x, app, item[3] if len(item) > 3 else None, (scores, emb)
 
 
 def items():
@@ -103,21 +117,42 @@ def build(arg):
 def main():
     global CFG
     CFG = frontend.chosen_alarm()
-    s = settings()
-    print(f"  final system: {s['choice']}\n  thresholds {s['thresholds']}\n  gate {s['fe']}", flush=True)
+    systems = [settings(*sb) for sb in SYSTEMS]
+    for s in systems:
+        print(f"  {s['name']}: {s['choice']}\n    thresholds {s['thresholds']}\n    gate {s['fe']}", flush=True)
     todo, wavs = items()
-    res = defaultdict(list)
+    raw = defaultdict(list)
     with Pool(C.WORKERS) as pool:
         for i, out in enumerate(pool.imap_unordered(build, [t + (wavs,) for t in todo], chunksize=4), 1):
             for r in out:
                 if r is None:
                     continue
-                kind, key, x, app, extra = r
-                scores, emb = efficientat.window_outputs(x, MODEL)
-                fired, m = run_final(x, s, scores, emb)
-                res[kind].append((key, app, fired, m, extra))
+                kind, key, x, app, extra, yam = r
+                base = bases({"yamnet": yam, MODEL: efficientat.window_outputs(x, MODEL)})
+                raw[kind].append((key, app, [run_final(x, s, base) for s in systems], extra))
             if i % 200 == 0:
                 print(f"  {i}/{len(todo)}", flush=True)
+    full = {}
+    for si, s in enumerate(systems):
+        res = {k: [(key, app, r[si][0], r[si][1], extra) for key, app, r, extra in v] for k, v in raw.items()}
+        full[s["name"]] = summarise(s, res)
+    full["macs"] = dict(yamnet=yamnet.macs_per_window(), mn10=efficientat.macs_per_window(MODEL),
+                        head=head.macs(head.load(head.path_for(MODEL))))
+    json.dump(full, open(os.path.join(C.RESULTS, "final.json"), "w"), indent=1)
+    print("\n  system            smoke(clean/10/0)  look-alike(clean/10/0)  stress-should/not  DESED duty  SINS duty  SINS alerts/h")
+    ra0 = next(iter(full.values()))["real_alarms"]
+    print(f"  {'today app':16s}  " + "/".join(f"{ra0['smoke alarm'][c]['app']:.2f}" for c in ("clean", "10 dB", "0 dB")) + "     " +
+          "/".join(f"{ra0['look-alike'][c]['app']:.2f}" for c in ("clean", "10 dB", "0 dB")) +
+          f"        {full[systems[0]['name']]['stress_app']}               -           -      {full[systems[0]['name']]['sins_all']['app_per_h']:.2f}")
+    for s in systems:
+        o = full[s["name"]]
+        ra = o["real_alarms"]
+        print(f"  {s['name']:16s}  " + "/".join(f"{ra['smoke alarm'][c]['final']:.2f}" for c in ("clean", "10 dB", "0 dB")) + "     " +
+              "/".join(f"{ra['look-alike'][c]['final']:.2f}" for c in ("clean", "10 dB", "0 dB")) +
+              f"        {o['stress_final']}   {o['desed']['duty']:.1%}     {o['sins_all']['duty']:.1%}     {o['sins_all']['final_per_h']:.2f}")
+
+
+def summarise(s, res):
     out = dict(system=s)
     # real alarms: share of clips raising a fire alarm, per group and condition
     k0 = int(RA.PRE_S * C.SR) // C.HOP
@@ -166,23 +201,11 @@ def main():
     out["sins_all"] = dict(hours=tot, duty=sum(a["duty_h"] for a in act.values()) / tot,
                            app_per_h=sum(a["app"] for a in act.values()) / tot,
                            final_per_h=sum(a["final"] for a in act.values()) / tot)
-    out["macs"] = dict(yamnet=yamnet.macs_per_window(), mn10=efficientat.macs_per_window(MODEL),
-                       head=head.macs(head.load(head.path_for(MODEL))))
-    json.dump(out, open(os.path.join(C.RESULTS, "final.json"), "w"), indent=1)
-    print("\n  real alarms (share raising a fire alarm; awake = classifier duty during the clip):")
-    for g, conds in out["real_alarms"].items():
-        for cond, v in conds.items():
-            print(f"    {g:12s} {cond:6s} n={v['n']:3d}  app {v['app']:.2f}  final {v['final']:.2f}  awake {v['awake']:.2f}")
-    print("  stress:")
-    for n, v in out["stress"].items():
-        print(f"    {n:30s} should fire {'yes' if v['expected_fire'] else 'no ':3s}  app {v['app']:.2f}  final {v['final']:.2f}")
-    d = out["desed"]
-    print(f"  DESED: {d['clips']} clips, duty {d['duty']:.1%}, wake recall {d['wake_recall_all']:.1%}, alerts {d['alerts']}")
-    sa = out["sins_all"]
-    print(f"  SINS: {sa['hours']:.1f} h, duty {sa['duty']:.1%}, alerts/h app {sa['app_per_h']:.2f} final {sa['final_per_h']:.2f}")
-    for k, v in sorted(out["sins"].items(), key=lambda kv: -kv[1]["hours"]):
-        print(f"    {k:16s} {v['hours']:5.2f} h duty {v['duty']:6.1%} alerts/h app {v['app_per_h']:.2f} final {v['final_per_h']:.2f}")
-    print(f"  MACs per window: {out['macs']}")
+    should = [v for v in out["stress"].values() if v["expected_fire"]]
+    shouldnt = [v for v in out["stress"].values() if not v["expected_fire"]]
+    for k in ("app", "final"):
+        out[f"stress_{k}"] = f"{np.mean([v[k] for v in should]):.2f}/{np.mean([v[k] for v in shouldnt]):.2f}"
+    return out
 
 
 if __name__ == "__main__":
