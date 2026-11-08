@@ -14,8 +14,8 @@
 \node[dsp, right=of goe] (t3) {tone track\\T-3 pattern};
 \node[dsp, below=5mm of goe.south -| fft] (knock) {impulse rhythm\\(knocks)};
 % classifier and decision
-\node[nn, right=6mm of gate] (yam) {YAMNet\\(only when awake)};
-\node[dec, below=6mm of yam] (rule) {alert rule\\$N$ windows, cooldown,\\siren veto, agreement};
+\node[nn, right=6mm of gate] (yam) {EfficientAT + head\\(only when awake)};
+\node[dec, below=6mm of yam] (rule) {alert rule\\smoothing, thresholds,\\$N$ windows, siren veto};
 \node[dec, right=of rule] (out) {alert\\vibration + screen};
 \draw[->] (mic) -- (buf);
 \draw[->] (buf.north) |- (hpf.west);

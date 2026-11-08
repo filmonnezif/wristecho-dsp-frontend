@@ -1,4 +1,4 @@
-"""Step 3: every figure of the paper, from results/results.json (+ one re-rendered test stream)."""
+"""Step 3: every figure of the paper, from results/*.json (results, improve, final, alarm_design)."""
 import json
 import os
 import sys
@@ -41,10 +41,12 @@ def save(fig, name):
 def pareto(r):
     fig, ax = plt.subplots(figsize=(3.4, 2.6))
     for k, pts in r["pareto_test"].items():
+        if k not in COL:  # the head's gate curve (H3) is not part of this figure
+            continue
         pts = sorted(pts, key=lambda p: p["duty"])
         ax.plot([100 * p["duty"] for p in pts], [100 * p["recall"] for p in pts], marker="o", ms=2, lw=1,
                 color=COL[k], label=NAME[k], ls="--" if k == "F3 v1" else "-")
-    for k in ("F0", "F0+A", "F2@5%", "F3@5%", PROPOSED):
+    for k in ("F0", "F2@5%", "F3@5%", PROPOSED):
         f = r["frontends"].get(k)
         if f:
             ax.plot(100 * f["duty_events"], 100 * f["recall"], "*" if k.startswith("F4") else "s",
@@ -147,12 +149,60 @@ def alarm_character():
     save(fig, "fig_alarm_character")
 
 
-def real_scenes():
-    """Naturally recorded audio: gate wake-up per DESED event class, classifier duty per SINS activity."""
-    p = os.path.join(C.RESULTS, "real_scenes.json")
+FINAL = "best_mn10@0.1"  # the recommended system (eval/final.py)
+CURVES = [("stock", "always-on", "YAMNet, always on", COL["F0"], "o", "--"),
+          ("stock", "full", "YAMNet + gate + DSP", "#56B4E9", "s", "-"),
+          ("best_yamnet", "full", "YAMNet + head + gate + DSP", "#009E73", "^", "-"),
+          ("best_mn10", "full", "EfficientAT + head + gate + DSP", COL["F4"], "D", "-")]
+
+
+def curve():
+    """Recall against false alarms per hour (test event streams) for false-alarm budgets 0.1-3 per hour."""
+    p = os.path.join(C.RESULTS, "improve.json")
     if not os.path.exists(p):
         return
-    r = json.load(open(p))
+    imp = json.load(open(p))["curve"]
+    f0 = json.load(open(os.path.join(C.RESULTS, "results.json")))["frontends"]["F0"]
+    fig, ax = plt.subplots(figsize=(3.4, 2.6))
+    for clf, mode, lab, col, mk, ls in CURVES:
+        pts = sorted(imp[clf].items(), key=lambda kv: float(kv[0]))
+        ax.plot([v[mode]["fa_per_hour_events"] for _, v in pts], [100 * v[mode]["recall"] for _, v in pts], marker=mk, ms=3,
+                lw=1, ls=ls, color=col, label=lab)
+    ax.plot(f0["fa_per_hour_events"], 100 * f0["recall"], "*", ms=9, color="k", label="today's app (YAMNet, 0.30)")
+    ax.set(xscale="log", xlabel="false alarms per hour (event streams)", ylabel="recall, 480 test events (%)", ylim=(20, 75))
+    ax.legend(fontsize=5.5, loc="lower right")
+    save(fig, "fig_curve")
+
+
+def transfer():
+    """Benchmark recall vs. real-home false alerts at each false-alarm budget (the transfer gap)."""
+    p = os.path.join(C.RESULTS, "final.json")
+    if not os.path.exists(p):
+        return
+    fin = json.load(open(p))
+    imp = json.load(open(os.path.join(C.RESULTS, "improve.json")))["curve"]
+    fig, axs = plt.subplots(1, 2, figsize=(7, 2.2))
+    for clf, lab, col, mk in (("best_yamnet", "YAMNet + head", "#009E73", "^"), ("best_mn10", "EfficientAT + head", COL["F4"], "D")):
+        bs = sorted(b for b in imp[clf] if f"{clf}@{b}" in fin)
+        axs[0].plot([float(b) for b in bs], [100 * imp[clf][b]["full"]["recall"] for b in bs], marker=mk, color=col, label=lab)
+        axs[1].plot([float(b) for b in bs], [fin[f"{clf}@{b}"]["sins_all"]["final_per_h"] for b in bs], marker=mk, color=col, label=lab)
+    any_sys = next(v for k, v in fin.items() if "@" in k)
+    axs[1].axhline(any_sys["sins_all"]["app_per_h"], color="k", ls="--", lw=0.8, label="today's app")
+    axs[0].axhline(100 * json.load(open(os.path.join(C.RESULTS, "results.json")))["frontends"]["F0"]["recall"], color="k", ls="--",
+                   lw=0.8, label="today's app")
+    axs[0].set(xscale="log", xlabel="false-alarm budget (per hour per class)", ylabel="recall, test streams (%)")
+    axs[1].set(xscale="log", xlabel="false-alarm budget (per hour per class)", ylabel="alerts per hour,\nreal home (SINS)")
+    for ax in axs:
+        ax.legend(fontsize=6)
+    save(fig, "fig_transfer")
+
+
+def real_scenes():
+    """Naturally recorded audio: gate wake-up per DESED event class, classifier duty per SINS activity."""
+    p = os.path.join(C.RESULTS, "final.json")
+    if not os.path.exists(p):
+        return
+    r = json.load(open(p))[FINAL]
     fig, axs = plt.subplots(1, 2, figsize=(7, 2.4))
     w = sorted(r["desed"]["wake_recall"].items(), key=lambda kv: kv[1]["rate"])
     axs[0].barh([k.replace("_", " ").replace(" toothbrush", "") for k, _ in w], [100 * v["rate"] for _, v in w], color=COL["F3"])
@@ -168,6 +218,8 @@ def real_scenes():
 
 def example(r):
     fe = r["frontends"].get("F4@1%", {}).get("frontend")
+    if not os.path.isdir(os.path.join(C.DATA, "demand")):
+        return
     spec = next(s for s in streams.specs() if s["split"] == "test" and s["env"] == "DLIVING" and s["kind"] == "events")
     x, events = streams.render(spec)
     level, bands = frontend.band_power(x)
@@ -199,8 +251,8 @@ def main():
     filters()
     pareto(r)
     idle_duty(r)
-    recall_snr(r)
-    stress()
+    curve()
+    transfer()
     alarm_character()
     real_scenes()
     example(r)
