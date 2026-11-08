@@ -1,95 +1,64 @@
-# Usage: python demo/onnx_for_matlab.py demo/model/mn10_frontend.onnx demo/model/mn10_frontend.onnx demo/model/final_system.mat
-"""Rewrite EfficientAT's squeeze-excitation blocks into ops MATLAB's ONNX importer handles natively, and drop
-the single-input Unsqueeze/Concat/ReduceMax no-op; check the outputs are unchanged with onnxruntime."""
+"""Make the exported mn10 model (demo/export_model.py) importable by MATLAB, and check it with onnxruntime:
+  1. EfficientAT's squeeze-excitation blocks become GlobalAveragePool + 1x1 convolutions (MATLAB's importer
+     cannot translate the original Gemm-based blocks), and the single-input Unsqueeze/Concat/ReduceMax no-op is
+     removed;
+  2. the log-mel front end is cut off: MATLAB computes it (WristEchoDemo>mn10) from model/logmel.mat (window,
+     mel filterbank), and model/mn10.onnx takes the 128 x 98 log-mel image.
+Usage (in a Python with onnx, onnxruntime, scipy): python demo/onnx_for_matlab.py
+"""
+import os
+import subprocess
 import sys
+
 import numpy as np
 import onnx
 import onnxruntime as ort
-from onnx import helper, numpy_helper
-from scipy.io import loadmat
+from onnx import TensorProto, helper, numpy_helper, shape_inference
+from scipy.io import loadmat, savemat
 
-src, dst, matf = sys.argv[1:4]
-m = onnx.load(src); g = m.graph
-init = {i.name: i for i in g.initializer}
-nodes = list(g.node)
-prod = {o: n for n in nodes for o in n.output}
-cons = {}
-for n in nodes:
-    for x in n.input:
-        cons.setdefault(x, []).append(n)
-remove, add_before, rename = set(), {}, {}
-k = 0
-for n in nodes:
-    a = {x.name: helper.get_attribute_value(x) for x in n.attribute}
-    # SE: ReduceMean(axes 2,3) -> Squeeze -> Squeeze -> Gemm -> Relu -> Gemm -> Sigmoid -> Reshape -> Mul
-    if n.op_type == "ReduceMean" and list(a.get("axes", [])) == [2, 3]:
-        chain = [n]
-        ok = True
-        for want in ("Squeeze", "Squeeze", "Gemm", "Relu", "Gemm", "Sigmoid", "Reshape", "Mul"):
-            nxt = [c for c in cons.get(chain[-1].output[0], []) if c.op_type == want]
-            if len(nxt) != 1:
-                ok = False
-                break
-            chain.append(nxt[0])
-        if not ok:
-            continue
-        rm, sq1, sq2, g1, r, g2, sg, rs, mul = chain
-        x = rm.input[0]
-        gap = f"se{k}_gap"; c1 = f"se{k}_c1"; r1 = f"se{k}_r1"; c2 = f"se{k}_c2"; s2 = f"se{k}_s"
-        new = [helper.make_node("GlobalAveragePool", [x], [gap], name=f"se{k}_n0")]
-        for gi, (gemm, out) in enumerate(((g1, c1), (g2, c2))):
-            W = numpy_helper.to_array(init[gemm.input[1]]); B = numpy_helper.to_array(init[gemm.input[2]])
-            wn, bn = f"se{k}_w{gi}", f"se{k}_b{gi}"
-            g.initializer.extend([numpy_helper.from_array(W.reshape(W.shape[0], W.shape[1], 1, 1).astype(np.float32), wn),
-                                  numpy_helper.from_array(B.astype(np.float32), bn)])
-            new.append(helper.make_node("Conv", [gap if gi == 0 else r1, wn, bn], [out], name=f"se{k}_n{gi + 1}", kernel_shape=[1, 1]))
-            if gi == 0:
-                new.append(helper.make_node("Relu", [c1], [r1], name=f"se{k}_n1r"))
-        new.append(helper.make_node("Sigmoid", [c2], [s2], name=f"se{k}_n3"))
-        other = [i for i in mul.input if i != rs.output[0]][0]
-        new.append(helper.make_node("Mul", [s2, other], [mul.output[0]], name=f"se{k}_n4"))
-        for c in chain:
-            remove.add(id(c))
-        for c in (sq1, sq2, rs):  # their Constant inputs become unused
-            for i in c.input[1:]:
-                if i in prod and prod[i].op_type == "Constant":
-                    remove.add(id(prod[i]))
-        add_before[id(mul)] = new
-        k += 1
-    # no-op: Unsqueeze(axis 0) -> Concat(single input) -> ReduceMax(axis 0, keepdims 0)
-    if n.op_type == "Unsqueeze":
-        c = cons.get(n.output[0], [])
-        if len(c) == 1 and c[0].op_type == "Concat" and len(c[0].input) == 1:
-            r = cons.get(c[0].output[0], [])
-            if len(r) == 1 and r[0].op_type == "ReduceMax":
-                rename[r[0].output[0]] = n.input[0]
-                for z in (n, c[0], r[0]):
-                    remove.add(id(z))
-                if n.input[1] in prod:
-                    remove.add(id(prod[n.input[1]]))
-out_nodes = []
-for n in nodes:
-    if id(n) in add_before:
-        out_nodes += add_before[id(n)]
-    if id(n) in remove:
-        continue
-    n.input[:] = [rename.get(i, i) for i in n.input]
-    out_nodes.append(n)
-del g.node[:]
-g.node.extend(out_nodes)
-used = {i for n in g.node for i in n.input}
-keep = [i for i in g.initializer if i.name in used]
-del g.initializer[:]
-g.initializer.extend(keep)
-del g.value_info[:]
-onnx.checker.check_model(m)
-onnx.save(m, dst)
-print(f"rewrote {k} SE blocks, removed {len(rename)} no-ops; nodes {len(nodes)} -> {len(g.node)}")
-M = loadmat(matf)
-x = M["test_x32"].ravel().astype(np.float64)
-y = x[1:] - 0.97 * x[:-1]
-y = np.pad(y, 512, mode="reflect").astype(np.float32)[None, None]
-a = ort.InferenceSession(src).run(None, {"xpad": y})
-b = ort.InferenceSession(dst).run(None, {"xpad": y})
-print("max |diff| logits", float(np.abs(a[0] - b[0]).max()), "embedding", float(np.abs(a[1] - b[1]).max()),
-      "| vs stored test logits", float(np.abs(b[0].ravel() - M["test_logits"].ravel()).max()))
+D = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model")
+
+
+def main():
+    src, se = os.path.join(D, "mn10_frontend.onnx"), os.path.join(D, "mn10_se.onnx")
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "se_rewrite.py"), src, se,
+                    os.path.join(D, "final_system.mat")], check=True)
+    m = onnx.load(se)
+    g = m.graph
+    init = {i.name: numpy_helper.to_array(i) for i in g.initializer}
+    stft = next(n for n in g.node if n.op_type == "Conv" and n.input[0] == g.input[0].name)
+    win = init[stft.input[1]][0, 0].astype(np.float64)            # the cos kernel of bin 0 = the padded window
+    mm = next(n for n in g.node if n.op_type == "MatMul")
+    banks = init[mm.input[0]].astype(np.float64)
+    first = next(i for i, n in enumerate(g.node) if n.op_type == "Unsqueeze" and any(
+        x == n.input[0] for x in [o for k in g.node if k.op_type == "Div" for o in k.output]))
+    cut_out = g.node[first].output[0]
+    keep = list(g.node[first + 1:])
+    for n in keep:
+        n.input[:] = ["mel" if x == cut_out else x for x in n.input]
+    del g.node[:]
+    g.node.extend(keep)
+    del g.input[:]
+    g.input.extend([helper.make_tensor_value_info("mel", TensorProto.FLOAT, [1, 1, banks.shape[0], 98])])
+    used = {x for n in g.node for x in n.input}
+    ini = [i for i in g.initializer if i.name in used]
+    del g.initializer[:]
+    g.initializer.extend(ini)
+    del g.value_info[:]
+    m = shape_inference.infer_shapes(m)
+    onnx.checker.check_model(m)
+    onnx.save(m, os.path.join(D, "mn10.onnx"))
+    os.remove(se)
+    savemat(os.path.join(D, "logmel.mat"), dict(window=win, banks=banks, n_fft=1024.0, hop=320.0, preemph=0.97))
+    M = loadmat(os.path.join(D, "final_system.mat"))
+    x = M["test_x32"].ravel()
+    y = np.pad(x[1:] - 0.97 * x[:-1], 512, mode="reflect")
+    fr = np.stack([y[t * 320:t * 320 + 1024] * win for t in range((len(y) - 1024) // 320 + 1)])
+    mel = ((np.log(banks @ (np.abs(np.fft.rfft(fr, 1024, axis=1)) ** 2).T + 1e-5) + 4.5) / 5).astype(np.float32)
+    o = ort.InferenceSession(os.path.join(D, "mn10.onnx")).run(None, {"mel": mel[None, None]})
+    print(f"  mn10.onnx + numpy log-mel vs the original export: max |logit| error "
+          f"{np.abs(o[0].ravel() - M['test_logits'].ravel()).max():.1e}")
+
+
+if __name__ == "__main__":
+    main()

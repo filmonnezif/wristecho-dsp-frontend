@@ -7,7 +7,7 @@ function WristEchoDemo(mode, extra)
 %   The app mixes the sound into room noise, runs the DSP front end and the classifier exactly as in the
 %   paper, and replays the result in real time: spectrogram, gate statistic vs. threshold, when the
 %   classifier is awake, Goertzel probe energies, the class scores and the alert.
-%   Classifier: "EfficientAT + head" is the paper's final system (EfficientAT-mn10 imported from ONNX,
+%   Classifier: "EfficientAT + head" is the paper's final system (log-mel computed here, EfficientAT-mn10 CNN imported from ONNX,
 %   the trained head, per-class smoothing and thresholds at 0.1 false alarms/h per class, from
 %   model/final_system.mat); "YAMNet" is today's app rule (score >= 0.30).
 %
@@ -299,14 +299,25 @@ end
 end
 
 function [logits, emb] = mn10(w)
-%MN10 EfficientAT-mn10 with its log-mel front end, imported from ONNX, on one 0.975 s window at 32 kHz.
-persistent net
+%MN10 EfficientAT-mn10 on one 0.975 s window at 32 kHz. Its log-mel front end is computed here (pre-emphasis,
+% reflect padding, 1024-point STFT with its 800-point Hann window, hop 320, 128-band mel filterbank, log); the
+% CNN is imported from ONNX (model/mn10.onnx, input 128 mel bands x 98 frames).
+persistent net L
 if isempty(net)
-    net = importNetworkFromONNX(fullfile(fileparts(mfilename('fullpath')), 'model', 'mn10_frontend.onnx'));
+    d = fullfile(fileparts(mfilename('fullpath')), 'model');
+    L = load(fullfile(d, 'logmel.mat'));
+    old = cd(tempdir);                                   % the importer writes helper packages to the current folder
+    g = dir('+mn10*'); for i = 1:numel(g), rmdir(g(i).name, 's'); end
+    net = importNetworkFromONNX(fullfile(d, 'mn10.onnx'), 'Namespace', 'mn10demo');
+    cd(old); addpath(tempdir);
 end
 y = w(2:end) - 0.97 * w(1:end - 1);                      % pre-emphasis
 y = [y(513:-1:2); y; y(end - 1:-1:end - 512)];           % reflect padding (n_fft / 2), as torch.stft(center=True)
-[o1, o2] = predict(net, dlarray(single(reshape(y, 1, 1, [])), 'CBT'));
+T = floor((numel(y) - 1024) / 320) + 1;
+F = y((0:T - 1) * 320 + (1:1024).') .* L.window(:);      % 1024 x T frames
+X = fft(F, 1024);
+mel = (log(L.banks * abs(X(1:513, :)) .^ 2 + 1e-5) + 4.5) / 5;   % 128 x T log-mel
+[o1, o2] = predict(net, dlarray(single(mel), 'SSCB'));
 o1 = double(extractdata(o1)); o2 = double(extractdata(o2));
 if numel(o1) == 527, logits = o1(:).'; emb = o2(:).'; else, logits = o2(:).'; emb = o1(:).'; end
 end

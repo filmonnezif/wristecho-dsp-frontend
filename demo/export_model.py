@@ -1,6 +1,6 @@
 """Export the paper's final classifier for the MATLAB demo (run in Colab after eval/improve.py):
 
-  demo/model/mn10_frontend.onnx  EfficientAT mn10 with its log-mel front end written as plain
+  demo/model/mn10_frontend.onnx  (then demo/onnx_for_matlab.py -> mn10.onnx + logmel.mat) EfficientAT mn10 with its log-mel front end written as plain
                                  convolutions (ONNX opset 13, which MATLAB imports). Input: one
                                  0.975 s window at 32 kHz, pre-emphasised (y[n] = x[n+1] - 0.97 x[n])
                                  and reflect-padded by 512 samples on both sides, shape (1, 1, 32223).

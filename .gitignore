@@ -5,3 +5,4 @@ figures/out/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+demo/model/mn10_frontend.onnx
