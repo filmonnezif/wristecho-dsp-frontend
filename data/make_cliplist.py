@@ -12,6 +12,10 @@ baby) and ESC-50 clock_alarm.
 Splits: FSD50K dev-train + dev-val -> tune, eval -> test; ESC-50 folds 1-4 -> tune, fold 5 -> test;
 Freesound design half -> tune, held-out half -> test (split by uploader). ESC-50 clips whose
 Freesound source also appears in FSD50K are dropped (cross-dataset leakage).
+FSD50K targets get "predominant": True when the dataset's raters marked the target class (or one of
+its sub-classes, e.g. "Police car (siren)") as present and predominant, False when not, None when
+unrated (FSD50K.metadata/pp_pnp_ratings_FSD50K.json). Used only to report a predominant-target
+subset; nothing is tuned on it.
 Tuning clips are further split into "train" (TRAIN_SHARE, the classifier head learns from these) and
 "calib" (thresholds, gate and knock settings are chosen on streams made of these), by a hash of the
 clip id (Freesound: of the uploader, so one uploader's recordings stay on one side).
@@ -34,6 +38,9 @@ HARD = ["Ringtone", "Telephone", "Bell", "Chime", "Door", "Buzz", "Microwave_ove
         "Hammer", "Tap", "Thump_and_thud", "Drawer_open_or_close", "Cupboard_open_or_close", "Clock", "Typing",
         "Dishes_and_pots_and_pans", "Speech", "Music", "Beep_and_bleep", "Whistle"]
 EXCLUDE = {"Alarm", "Crying_and_sobbing"}
+# AudioSet ids whose predominance ratings count for each target subtype (the class and its sub-classes)
+RATED = {"siren": {"/m/03kmc9", "/m/04qvtq", "/m/012n7d", "/m/012ndj", "/m/0dgbq"}, "knock": {"/m/07r4wb8"},
+         "doorbell": {"/m/03wwcy", "/m/07r67yg"}, "horn": {"/m/0912c9", "/m/07qv_d5", "/m/05x_td"}}
 N_HARD = {"tune": 900, "test": 400}
 N_EASY = {"tune": 900, "test": 400}
 
@@ -69,6 +76,11 @@ def main():
             clips.append(dict(base, role="target", category=cat, subtype=sub))
         else:
             clips.append(dict(base, role="distractor", category=None, subtype="easy"))
+    ratings = json.load(open(os.path.join(C.DATA, "fsd50k", "meta", "FSD50K.metadata", "pp_pnp_ratings_FSD50K.json")))
+    for c in clips:
+        if c["src"] == "fsd" and c["role"] == "target":
+            v = [x for m, xs in ratings.get(c["id"], {}).items() if m in RATED[c["subtype"]] for x in xs]
+            c["predominant"] = None if 1.0 not in v and 0.5 not in v else (1.0 in v and 0.5 not in v)
     here = os.path.dirname(os.path.abspath(__file__))
     for f in json.load(open(os.path.join(here, "freesound.json"))) + json.load(open(os.path.join(here, "freesound_extra.json"))):
         base = dict(src="fs", dir="freesound", id=str(f["id"]), user=f["user"], preview=f["preview"],
