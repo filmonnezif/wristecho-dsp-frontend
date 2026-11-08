@@ -43,7 +43,7 @@ ALARM_SEEDS = {"tune": range(0, 60), "test": range(100, 140), "train": range(200
 # tuning streams), two renderings each, from the tuning clips set aside for training (TRAIN_SHARE of
 # them, by clip id). Thresholds are then chosen on the tuning streams, whose clips the head never saw.
 TRAIN_CHANNELS = [2, 4, 6, 8, 10, 12, 14, 16]
-TRAIN_COPIES = 2
+TRAIN_COPIES = 4
 TRAIN_SHARE = 0.7
 
 # --- Classifier decision rule (the WristEcho app's SoundDetector) ------------------------------
@@ -64,9 +64,9 @@ ORDER = list(CATEGORIES)  # priority: most urgent first
 # within LABEL_DB of its own peak) covers at least LABEL_MIN_S of the window; otherwise "other".
 HEAD_CLASSES = ORDER + ["OTHER"]
 LABEL_DB, LABEL_MIN_S = 30.0, 0.06
-# "+yamnet": the same model also reading YAMNet's own category scores (stacked head)
-HEAD_MODELS = {"logreg": dict(C=[0.001, 0.01, 0.1]), "mlp": dict(hidden=[128, 256], alpha=[1e-4, 1e-3]),
-               "logreg+yamnet": dict(C=[0.001, 0.01, 0.1]), "mlp+yamnet": dict(hidden=[128, 256], alpha=[1e-4, 1e-3])}
+# "+scores": the same model also reading the backbone's own category scores (stacked head)
+HEAD_MODELS = {"logreg": dict(C=[0.001, 0.01]), "logreg+scores": dict(C=[0.001, 0.01]),
+               "mlp+scores": dict(hidden=[256], alpha=[1e-3])}
 FA_BUDGET_PER_H = 0.3  # per category: thresholds of the head (and tuned YAMNet) keep tuning FA/h below this
 HEAD_THRESHOLDS = np.r_[np.round(np.arange(0.05, 0.951, 0.025), 3), [0.975, 0.99, 0.995, 0.998, 0.999]]
 COOLDOWN_S = 20.0

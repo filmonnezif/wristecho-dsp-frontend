@@ -19,7 +19,7 @@ from classifier import yamnet  # noqa: E402
 from data import streams  # noqa: E402
 from dsp import frontend  # noqa: E402
 
-DIRS = {False: os.path.join(C.CACHE, "v6"), True: os.path.join(C.CACHE, "v6train")}
+DIRS = {False: os.path.join(C.CACHE, "v6"), True: os.path.join(C.CACHE, "v7train")}  # v7: extra training clips
 
 
 def job(arg):
@@ -42,7 +42,7 @@ def job(arg):
 
 
 def main(limit=None):
-    for train in (True, False):
+    for train in (False, True):
         os.makedirs(DIRS[train], exist_ok=True)
         specs = streams.specs(train)[:limit]
         t = time.time()

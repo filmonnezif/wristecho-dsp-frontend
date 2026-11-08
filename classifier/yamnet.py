@@ -77,15 +77,16 @@ def window_scores(x):
     return window_outputs(x)[0]
 
 
-def category_scores(scores):
-    """(n_windows, categories, 2): best label score and best veto-label score per category."""
-    idx = {l: i for i, l in enumerate(labels())}
+def category_scores(scores, label_list=None):
+    """(n_windows, categories, 2): best label score and best veto-label score per category.
+    label_list: the scores' class names (default YAMNet's; EfficientAT uses AudioSet's 527)."""
+    idx = {l: i for i, l in enumerate(label_list or labels())}
     out = np.zeros((len(scores), len(C.ORDER), 2), np.float32)
     for j, c in enumerate(C.ORDER):
         d = C.CATEGORIES[c]
-        out[:, j, 0] = scores[:, [idx[l] for l in d["labels"]]].max(axis=1)
-        if d["veto"]:
-            out[:, j, 1] = scores[:, [idx[l] for l in d["veto"]]].max(axis=1)
+        out[:, j, 0] = scores[:, [idx[l] for l in d["labels"] if l in idx]].max(axis=1)
+        if any(l in idx for l in d["veto"]):
+            out[:, j, 1] = scores[:, [idx[l] for l in d["veto"] if l in idx]].max(axis=1)
     return out
 
 

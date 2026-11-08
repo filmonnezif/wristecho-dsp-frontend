@@ -12,8 +12,21 @@ import numpy as np
 
 import config as C
 
-PATH = os.path.join(C.RESULTS, "head.npz")
+PATH = os.path.join(C.RESULTS, "head.npz")  # the YAMNet head; other backbones: head_<backbone>.npz
 _head = None
+
+
+def path_for(backbone):
+    return PATH if backbone == "yamnet" else os.path.join(C.RESULTS, f"head_{backbone}.npz")
+
+
+def labels_for(backbone):
+    """Class names of a backbone's scores (EfficientAT's are saved next to its cache by eval/extract_eat.py)."""
+    if backbone == "yamnet":
+        from classifier import yamnet
+        return yamnet.labels()
+    import json
+    return json.load(open(os.path.join(C.CACHE, f"eat_{backbone}", "labels.json")))
 
 
 def load(path=PATH):
@@ -23,7 +36,8 @@ def load(path=PATH):
         n = int(z["layers"])
         h = dict(mu=z["mu"], sd=z["sd"], W=[z[f"W{i}"] for i in range(n)], b=[z[f"b{i}"] for i in range(n)],
                  thresholds=dict(zip(C.ORDER, z["thresholds"].tolist())) if "thresholds" in z else None,
-                 stack=bool(z["stack"]) if "stack" in z else False)
+                 stack=bool(z["stack"]) if "stack" in z else False,
+                 backbone=str(z["backbone"]) if "backbone" in z else "yamnet")
         if path != PATH:
             return h
         _head = h
@@ -63,7 +77,9 @@ def category_scores(emb, scores, h=None):
     look-alikes as "other")."""
     from classifier import yamnet
     h = h or load()
-    p = probs(features(emb, yamnet.category_scores(scores)[:, :, 0], h["stack"]), h)
+    if h.get("stack") is None:
+        h["stack"] = False
+    p = probs(features(emb, yamnet.category_scores(scores, labels_for(h["backbone"]))[:, :, 0], h["stack"]), h)
     out = np.zeros((len(p), len(C.ORDER), 2), np.float32)
     out[:, :, 0] = p[:, [C.HEAD_CLASSES.index(c) for c in C.ORDER]]
     return out

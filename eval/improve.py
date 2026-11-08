@@ -1,8 +1,8 @@
 """Step 2e: per-class classifier choice, score smoothing, and the false-alarm budget curve.
 
-1. Candidates per category: the score of stock YAMNet, of the trained head, or their mean, each
-   smoothed by a causal moving average over the last k = 1, 2 or 3 windows (a one-window spike no
-   longer fires an alert). Each candidate gets thresholds at the false-alarm budget on the tuning
+1. Candidates per category: for each backbone (YAMNet; EfficientAT mn04 / mn10 when cached), its own
+   labels' score, its trained head's score, or their mean, each smoothed by a causal moving average
+   over the last k = 1, 2 or 3 windows (a one-window spike no longer fires an alert). Each candidate gets thresholds at the false-alarm budget on the tuning
    streams; per category the candidate with the highest tuning recall is kept ("best").
 2. Curve: for false-alarm budgets of 0.1-3 per hour, thresholds are re-chosen on the tuning
    streams for stock YAMNet and for "best", and both are measured on the test streams always on
@@ -20,7 +20,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import config as C  # noqa: E402
 from eval import evaluate as E  # noqa: E402
 
-SOURCES = ("stock", "head", "mean")
 SMOOTH = (1, 2, 3)
 CURVE_BUDGETS = [0.1, 0.3, 1.0, 3.0]
 DATA = []  # set before the worker pools fork, so workers share it
@@ -36,13 +35,34 @@ def smooth(x, k):
     return (c[i + 1] - c[lo]) / (i + 1 - lo)[:, None, None]
 
 
+def backbones():
+    from classifier import efficientat, head
+    return ["yamnet"] + [m for m in efficientat.MODELS if os.path.exists(head.path_for(m))]
+
+
+def add_eat(s):
+    """Category scores of EfficientAT's own labels and of its trained head, for stream s."""
+    from classifier import head, yamnet
+    for m in backbones()[1:]:
+        z = np.load(os.path.join(C.CACHE, f"eat_{m}", s["id"] + ".npz"))
+        sc, emb = z["scores"].astype(np.float32), z["emb"].astype(np.float32)
+        s["cat"][f"{m}:stock"] = yamnet.category_scores(sc, head.labels_for(m))
+        s["cat"][f"{m}:head"] = head.category_scores(emb, sc, head.load(head.path_for(m)))
+
+
+def sources():
+    return ["stock", "head", "mean"] + [f"{m}:{k}" for m in backbones()[1:] for k in ("stock", "head", "mean")]
+
+
 def add_variants(s):
-    st, hd = s["cat"]["stock"], s["cat"]["head"]
-    mean = st.copy()
-    mean[:, :, 0] = (st[:, :, 0] + hd[:, :, 0]) / 2
-    for src, base in (("stock", st), ("head", hd), ("mean", mean)):
-        for k in SMOOTH:
-            s["cat"][f"{src}/{k}"] = smooth(base, k)
+    pairs = [("", "stock", "head")] + [(f"{m}:", f"{m}:stock", f"{m}:head") for m in backbones()[1:]]
+    for pre, a, b in pairs:
+        st, hd = s["cat"][a], s["cat"][b]
+        mean = st.copy()
+        mean[:, :, 0] = (st[:, :, 0] + hd[:, :, 0]) / 2
+        for src, base in ((a, st), (b, hd), (pre + "mean", mean)):
+            for k in SMOOTH:
+                s["cat"][f"{src}/{k}"] = smooth(base, k)
 
 
 def tune_split():
@@ -90,20 +110,25 @@ def main():
     from dsp import frontend
     DATA = E.load()
     for s in DATA:
+        add_eat(s)
         add_variants(s)
-    variants = [f"{src}/{k}" for src in SOURCES for k in SMOOTH]
+    variants = [f"{src}/{k}" for src in sources() for k in SMOOTH]
     with Pool(min(len(variants), C.WORKERS)) as pool:
         cand = pool.map(candidate, variants)
     print(f"  tuning recall per category at {C.FA_BUDGET_PER_H} FA/h (per candidate):")
     for v, thr, rec in cand:
         print(f"    {v:8s} " + " ".join(f"{c.lower()} {rec[c]:.3f}@{thr[c]:g}" for c in C.ORDER))
+    yam = [r for r in cand if ":" not in r[0]]
+    choice_y = {c: max(yam, key=lambda r: (r[2][c], -variants.index(r[0])))[0] for c in C.ORDER}
     choice = {c: max(cand, key=lambda r: (r[2][c], -variants.index(r[0])))[0] for c in C.ORDER}
-    print(f"  chosen per category: {choice}", flush=True)
+    print(f"  chosen per category (YAMNet only): {choice_y}", flush=True)
+    print(f"  chosen per category (any backbone): {choice}", flush=True)
     for s in DATA:
+        s["cat"]["best_yamnet"] = np.stack([s["cat"][choice_y[c]][:, j] for j, c in enumerate(C.ORDER)], axis=1)
         s["cat"]["best"] = np.stack([s["cat"][choice[c]][:, j] for j, c in enumerate(C.ORDER)], axis=1)
     cost = [macs_per_window(), frontend.gate_ops_per_window(), frontend.alarm_ops_per_window(frontend.chosen_alarm()),
             frontend.knock_ops_per_window(), head.macs()]
-    jobs = [(clf, b, cost) for clf in ("stock", "best") for b in CURVE_BUDGETS]
+    jobs = [(clf, b, cost) for clf in ("stock", "best_yamnet", "best") for b in CURVE_BUDGETS]
     with Pool(min(len(jobs), C.WORKERS)) as pool:
         pts = pool.map(point, jobs)
     curve = {}
@@ -116,10 +141,11 @@ def main():
         for mode in ("always-on", "full"):
             tests[f"best {mode} vs stock always-on @{b}"] = E.mcnemar(np.array(bb[mode]["hits"]), np.array(sb["always-on"]["hits"]))
     json.dump(dict(candidates=[dict(variant=v, thresholds=t, tune_recall=r) for v, t, r in cand], choice=choice,
+                   choice_yamnet=choice_y,
                    curve=curve, tests=tests), open(os.path.join(C.RESULTS, "improve.json"), "w"), indent=1)
     print(f"\n  {'classifier':10s} {'FA/h budget':>11s} {'mode':>9s} {'recall':>7s} {'>=5dB':>6s} " +
           " ".join(f"{c[:5].lower():>6s}" for c in C.ORDER) + f" {'FA/h ev':>7s} {'FA/h id':>7s} {'duty id':>7s}")
-    for clf in ("stock", "best"):
+    for clf in ("stock", "best_yamnet", "best"):
         for b in CURVE_BUDGETS:
             for mode in ("always-on", "full"):
                 r = curve[clf][str(b)][mode]

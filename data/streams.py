@@ -79,6 +79,8 @@ def synthetic_alarm(seed):
 def clip_path(c):
     if c["src"] == "fs":
         return os.path.join(C.DATA, "freesound", c["id"] + ".mp3")
+    if c["src"] == "us8k":
+        return os.path.join(C.DATA, "UrbanSound8K", "audio", c["dir"], c["id"])
     if c["src"] == "esc":
         return os.path.join(C.DATA, "ESC-50-master", "audio", c["id"])
     return os.path.join(C.DATA, "fsd50k", "clips", c["dir"], c["id"] + ".wav")
@@ -132,6 +134,8 @@ def specs(train=False):
     classifier head's training streams."""
     clips = json.load(open(os.path.join(C.ROOT, "data", "cliplist.json")))
     if train:
+        from setup.extra_data import extra_clips
+        clips += extra_clips()  # extra training-only recordings (Freesound, UrbanSound8K)
         return _stream_specs(np.random.default_rng(C.SEED + 1), "train", C.TUNE_ENVS, C.TRAIN_CHANNELS,
                              C.TRAIN_COPIES, "train", clips)
     rng = np.random.default_rng(C.SEED)
