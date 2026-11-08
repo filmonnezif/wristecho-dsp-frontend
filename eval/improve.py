@@ -4,6 +4,9 @@
    labels' score, its trained head's score, or their mean, each smoothed by a causal moving average
    over the last k = 1, 2 or 3 windows (a one-window spike no longer fires an alert). Each candidate gets thresholds at the false-alarm budget on the tuning
    streams; per category the candidate with the highest tuning recall is kept ("best").
+3. Per-class budgets (for the one-network EfficientAT system): the same total false-alarm budget as
+   0.1 per hour per class (0.5 per hour over five classes) is shared between the classes where it buys
+   the most tuning recall (exact search over each class's thresholds), instead of 0.1 for each class.
 2. Curve: for false-alarm budgets of 0.1-3 per hour, thresholds are re-chosen on the tuning
    streams for stock YAMNet and for "best", and both are measured on the test streams always on
    and as the full system (gate at the 5 % budget + DSP alarm and knock detectors + siren veto).
@@ -21,6 +24,7 @@ import config as C  # noqa: E402
 from eval import evaluate as E  # noqa: E402
 
 SMOOTH = (1, 2, 3)
+TOTAL_BUDGET = 0.5  # false alarms per hour, all classes together (= 5 classes x 0.1)
 CURVE_BUDGETS = [0.1, 0.3, 1.0, 3.0]
 DATA = []  # set before the worker pools fork, so workers share it
 
@@ -82,13 +86,41 @@ def candidate(v):
                     for c in C.ORDER}
 
 
+def class_options(clf):
+    """Per class and threshold, on the tuning streams: (false alarms, detections)."""
+    tune = tune_split()
+    out = {c: [] for c in C.ORDER}
+    for t in C.HEAD_THRESHOLDS:
+        sc = E.score(tune, E.run(dict(kind="F0", clf=clf, veto=True, thresholds={c: float(t) for c in C.ORDER}), tune))
+        cats = np.array([r["category"] for r in sc["rows"]])
+        for c in C.ORDER:
+            out[c].append((sum(n for (_, cc), n in sc["fa"].items() if cc == c), int(sc["hits"][cats == c].sum()), float(t)))
+    return out
+
+
+def allocate(opts, max_fa):
+    """Thresholds maximising total tuning detections with at most max_fa false alarms over all classes
+    (exact dynamic programme over the integer false-alarm count)."""
+    best = {0: (0, {})}
+    for c in C.ORDER:
+        nxt = {}
+        for fa0, (hits0, thr0) in best.items():
+            for fa, hits, t in opts[c]:
+                f = fa0 + fa
+                if f <= max_fa and (f not in nxt or hits0 + hits > nxt[f][0]):
+                    nxt[f] = (hits0 + hits, dict(thr0, **{c: t}))
+        best = nxt
+    return max(best.values(), key=lambda v: v[0])[1]
+
+
 def point(arg):
-    """Thresholds at a false-alarm budget for classifier clf; test results always on and as the full system."""
-    clf, budget, cost = arg
+    """Thresholds at a false-alarm budget (or given ones) for classifier clf; test results always on and as
+    the full system."""
+    clf, budget, cost = arg[:3]
     tune = tune_split()
     test = [s for s in DATA if s["split"] == "test"]
     rng = np.random.default_rng(C.SEED)
-    thr = E.tune_thresholds(tune, clf, budget)
+    thr = arg[3] if len(arg) > 3 else E.tune_thresholds(tune, clf, budget)
     on = dict(kind="F0", clf=clf, veto=True, thresholds=thr)
     base = E.score(tune, E.run(on, tune))["hits"]
     table = E.sweep([dict(fe, clf=clf, thresholds=thr) for fe in E.grid("F3", "two-floor+6")], tune, base)
@@ -145,6 +177,14 @@ def main():
     curve = {}
     for clf, b, thr, out in pts:
         curve.setdefault(clf, {})[str(b)] = dict(thresholds=thr, **out)
+    if "best_mn10" in choices:
+        tune = tune_split()
+        hrs = E.hours(tune, "idle") + E.hours(tune, "events")
+        thr = allocate(class_options("best_mn10"), int(np.floor(TOTAL_BUDGET * hrs)))
+        print(f"  per-class budgets (total {TOTAL_BUDGET} FA/h on tuning): thresholds {thr}", flush=True)
+        _, _, thr, out = point(("best_mn10", "0.1", cost, thr))
+        curve["best_mn10_perclass"] = {"0.1": dict(thresholds=thr, **out)}
+        choices["best_mn10_perclass"] = choices["best_mn10"]
     tests = {}
     for b in CURVE_BUDGETS:
         sb = curve["stock"][str(b)]
@@ -156,8 +196,8 @@ def main():
                    curve=curve, tests=tests), open(os.path.join(C.RESULTS, "improve.json"), "w"), indent=1)
     print(f"\n  {'classifier':10s} {'FA/h budget':>11s} {'mode':>9s} {'recall':>7s} {'>=5dB':>6s} " +
           " ".join(f"{c[:5].lower():>6s}" for c in C.ORDER) + f" {'FA/h ev':>7s} {'FA/h id':>7s} {'duty id':>7s}")
-    for clf in ["stock"] + list(choices):
-        for b in CURVE_BUDGETS:
+    for clf in ["stock"] + [k for k in choices if k in curve]:
+        for b in [b for b in CURVE_BUDGETS if str(b) in curve[clf]]:
             for mode in ("always-on", "full"):
                 r = curve[clf][str(b)][mode]
                 print(f"  {clf:10s} {b:11g} {mode:>9s} {r['recall']:7.3f} {r['recall_snr_ge5']:6.3f} " +

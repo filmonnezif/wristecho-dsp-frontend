@@ -32,7 +32,7 @@ from eval.improve import smooth  # noqa: E402
 
 # systems evaluated: (selection set, false-alarm budget); the first is the default "final" one
 SYSTEMS = [("best_mn10", "0.1"), ("best_mn10", "0.3"), ("best_mn10", "1.0"), ("best_yamnet", "0.1"), ("best_yamnet", "0.3"),
-           ("best_yamnet", "1.0")]
+           ("best_yamnet", "1.0"), ("best_mn10_perclass", "0.1")]
 MODEL = "mn10_as"
 CFG = None
 
