@@ -62,7 +62,7 @@ def mean_ap(y, p):
 def fit(kind, params, X, y, rng):
     from sklearn.linear_model import LogisticRegression
     from sklearn.neural_network import MLPClassifier
-    if kind == "logreg":
+    if kind.startswith("logreg"):
         m = LogisticRegression(C=params["C"], class_weight="balanced", max_iter=500)
         m.fit(X, y)
         return [m.coef_.T.astype(np.float32)], [m.intercept_.astype(np.float32)]
@@ -76,8 +76,9 @@ def fit(kind, params, X, y, rng):
     return [w.astype(np.float32) for w in m.coefs_], [b.astype(np.float32) for b in m.intercepts_]
 
 
-def save(path, mu, sd, W, b, thresholds=None):
-    arrs = dict(mu=mu, sd=sd, layers=len(W), **{f"W{i}": w for i, w in enumerate(W)}, **{f"b{i}": v for i, v in enumerate(b)})
+def save(path, mu, sd, W, b, stack, thresholds=None):
+    arrs = dict(mu=mu, sd=sd, layers=len(W), stack=stack, **{f"W{i}": w for i, w in enumerate(W)},
+                **{f"b{i}": v for i, v in enumerate(b)})
     if thresholds:
         arrs["thresholds"] = np.array([thresholds[c] for c in C.ORDER], np.float32)
     np.savez(path, **arrs)
@@ -86,14 +87,16 @@ def save(path, mu, sd, W, b, thresholds=None):
 def main():
     t = time.time()
     rng = np.random.default_rng(C.SEED)
-    X, y, _, _ = read(sorted(glob.glob(os.path.join(DIRS[True], "*.npz"))))
-    Xv, yv, stock_v, _ = read(sorted(glob.glob(os.path.join(DIRS[False], "tune-*.npz"))))
+    E, y, stock, _ = read(sorted(glob.glob(os.path.join(DIRS[True], "*.npz"))))
+    Ev, yv, stock_v, _ = read(sorted(glob.glob(os.path.join(DIRS[False], "tune-*.npz"))))
     print(f"  training windows {len(y):,} {np.bincount(y, minlength=len(C.HEAD_CLASSES)).tolist()}, "
           f"tuning windows {len(yv):,} ({time.time() - t:.0f} s)", flush=True)
-    mu, sd = X.mean(0), X.std(0) + 1e-6
-    Xs, Xvs = (X - mu) / sd, (Xv - mu) / sd
     table, best = [], None
     for kind, grid in C.HEAD_MODELS.items():
+        stack = kind.endswith("+yamnet")
+        X, Xv = head.features(E, stock, stack), head.features(Ev, stock_v, stack)
+        mu, sd = X.mean(0), X.std(0) + 1e-6
+        Xs, Xvs = (X - mu) / sd, (Xv - mu) / sd
         keys = list(grid)
         for vals in np.array(np.meshgrid(*grid.values()), dtype=object).T.reshape(-1, len(keys)):
             params = {k: (int(v) if k == "hidden" else float(v)) for k, v in zip(keys, vals)}
@@ -104,24 +107,25 @@ def main():
             print(f"  {kind} {params}: tuning mAP {m:.3f} {({k: round(v, 3) for k, v in ap.items()})} "
                   f"({time.time() - t:.0f} s)", flush=True)
             if best is None or m > best[0]:
-                best = (m, kind, params, W, b)
-    _, kind, params, W, b = best
+                best = (m, kind, params, W, b, mu, sd, stack)
+    _, kind, params, W, b, mu, sd, stack = best
     os.makedirs(C.RESULTS, exist_ok=True)
-    save(head.PATH, mu, sd, W, b)
+    save(head.PATH, mu, sd, W, b, stack)
     head._head = None
     from eval import evaluate
     tune = [s for s in evaluate.load() if s["split"] == "tune"]
     thr = evaluate.tune_thresholds(tune, "head")
-    save(head.PATH, mu, sd, W, b, thr)
+    save(head.PATH, mu, sd, W, b, stack, thr)
     head._head = None
     from scipy.io import savemat
-    savemat(os.path.join(C.RESULTS, "head.mat"), dict(mu=mu, sd=sd, classes=np.array(C.HEAD_CLASSES, dtype=object),
+    savemat(os.path.join(C.RESULTS, "head.mat"), dict(mu=mu, sd=sd, stack=stack, classes=np.array(C.HEAD_CLASSES, dtype=object),
+                                                     categories=np.array(C.ORDER, dtype=object),
                                                      thresholds=np.array([thr[c] for c in C.ORDER]),
                                                      **{f"W{i}": w for i, w in enumerate(W)},
                                                      **{f"b{i}": v.reshape(1, -1) for i, v in enumerate(b)}))
     # test windows, scored once at the end: the stock label score vs the head's probability
-    Xt, yt, stock_t, _ = read(sorted(glob.glob(os.path.join(DIRS[False], "test-*.npz"))))
-    pt = head.probs(Xt)
+    Et, yt, stock_t, _ = read(sorted(glob.glob(os.path.join(DIRS[False], "test-*.npz"))))
+    pt = head.probs(head.features(Et, stock_t, stack))
     out = dict(chosen=dict(kind=kind, params=params, macs=head.macs()), selection=table, thresholds=thr,
                train_counts=dict(zip(C.HEAD_CLASSES, np.bincount(y, minlength=len(C.HEAD_CLASSES)).tolist())),
                test_counts=dict(zip(C.HEAD_CLASSES, np.bincount(yt, minlength=len(C.HEAD_CLASSES)).tolist())),

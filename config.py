@@ -64,7 +64,9 @@ ORDER = list(CATEGORIES)  # priority: most urgent first
 # within LABEL_DB of its own peak) covers at least LABEL_MIN_S of the window; otherwise "other".
 HEAD_CLASSES = ORDER + ["OTHER"]
 LABEL_DB, LABEL_MIN_S = 30.0, 0.06
-HEAD_MODELS = {"logreg": dict(C=[0.01, 0.1, 1.0]), "mlp": dict(hidden=[128, 256], alpha=[1e-4, 1e-3])}
+# "+yamnet": the same model also reading YAMNet's own category scores (stacked head)
+HEAD_MODELS = {"logreg": dict(C=[0.001, 0.01, 0.1]), "mlp": dict(hidden=[128, 256], alpha=[1e-4, 1e-3]),
+               "logreg+yamnet": dict(C=[0.001, 0.01, 0.1]), "mlp+yamnet": dict(hidden=[128, 256], alpha=[1e-4, 1e-3])}
 FA_BUDGET_PER_H = 0.3  # per category: thresholds of the head (and tuned YAMNet) keep tuning FA/h below this
 HEAD_THRESHOLDS = np.round(np.arange(0.05, 0.951, 0.025), 3)
 COOLDOWN_S = 20.0

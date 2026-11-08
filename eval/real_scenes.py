@@ -69,7 +69,7 @@ def outputs(x):
     scores, emb = yamnet.window_outputs(x)
     out = {"stock": yamnet.category_scores(scores)}
     if head.available():
-        out["head"] = head.category_scores(emb)
+        out["head"] = head.category_scores(emb, scores)
     return out
 
 

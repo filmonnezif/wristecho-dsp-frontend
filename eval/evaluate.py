@@ -43,8 +43,8 @@ def _load(p):
     meta = json.loads(str(z["meta"]))
     cat = {"stock": yamnet.category_scores(z["scores"].astype(np.float32))}
     if head.available():
-        cat["head"] = head.category_scores(z["emb"].astype(np.float32))
-    s = dict(cat=cat, level=frontend.per_window(z["level"].astype(np.float32), n),
+        cat["head"] = head.category_scores(z["emb"].astype(np.float32), z["scores"].astype(np.float32))
+    s = dict(cat=cat, n=n, level=frontend.per_window(z["level"].astype(np.float32), n),
              alarms={"v4": [(float(t), "FIRE_ALARM") for t in z["alarms"]],
                      "strict": [(float(t), "FIRE_ALARM") for t in z["alarms_strict"]]},
              nov={v: frontend.gate_novelty(bands, n, d) for v, d in C.GATE_VARIANTS.items()},
@@ -92,7 +92,7 @@ def mask(fe, s):
     if k == "F0":
         return None
     if k == "F1":
-        return np.arange(len(s["cat"])) % fe["k"] == 0
+        return np.arange(s["n"]) % fe["k"] == 0
     if k == "F2":
         return hang(s["level"] > fe["thr"], fe["hang"])
     return hang(s["nov"][fe["variant"]] > fe["thr"], fe["hang"])
@@ -158,8 +158,8 @@ def score(streams, res):
     causes = {}
     windows = awake = 0
     for s, (m, fired) in zip(streams, res):
-        windows += len(s["cat"])
-        awake += len(s["cat"]) if m is None else int(m.sum())
+        windows += s["n"]
+        awake += s["n"] if m is None else int(m.sum())
         tg = [e for e in s["events"] if e["role"] == "target"]
         for e in tg:
             ts = [t for t, c in fired if c == e["category"] and e["onset"] <= t <= e["end"] + C.HIT_MARGIN_S]
@@ -179,7 +179,7 @@ def score(streams, res):
 
 
 def hours(streams, kind):
-    return sum(len(s["cat"]) for s in streams if s["kind"] == kind) * C.HOP / C.SR / 3600
+    return sum(s["n"] for s in streams if s["kind"] == kind) * C.HOP / C.SR / 3600
 
 
 def grid(kind, variant=None):

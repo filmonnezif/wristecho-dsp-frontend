@@ -2,7 +2,9 @@
 
 Stored as plain arrays (results/head.npz; demo/head.mat for MATLAB): input standardisation, then
 dense layers with ReLU between them and a softmax over config.HEAD_CLASSES. A logistic-regression
-head is the one-layer case. eval/train_head.py trains it; this module only runs it.
+head is the one-layer case. A "stacked" head also reads YAMNet's own category scores (as logits),
+so it refines YAMNet's answer instead of replacing it. eval/train_head.py trains it; this module
+only runs it.
 """
 import os
 
@@ -20,7 +22,8 @@ def load(path=PATH):
         z = np.load(path)
         n = int(z["layers"])
         h = dict(mu=z["mu"], sd=z["sd"], W=[z[f"W{i}"] for i in range(n)], b=[z[f"b{i}"] for i in range(n)],
-                 thresholds=dict(zip(C.ORDER, z["thresholds"].tolist())) if "thresholds" in z else None)
+                 thresholds=dict(zip(C.ORDER, z["thresholds"].tolist())) if "thresholds" in z else None,
+                 stack=bool(z["stack"]) if "stack" in z else False)
         if path != PATH:
             return h
         _head = h
@@ -31,10 +34,20 @@ def available():
     return os.path.exists(PATH)
 
 
-def probs(emb, h=None):
-    """(n, len(HEAD_CLASSES)) class probabilities for embeddings (n, 1024)."""
+def features(emb, stock=None, stack=False):
+    """The head's input: the embedding, plus (stacked) the logits of YAMNet's category scores
+    (n, categories), as yamnet.category_scores(...)[:, :, 0]."""
+    emb = np.asarray(emb, np.float32)
+    if not stack:
+        return emb
+    p = np.clip(np.asarray(stock, np.float32), 1e-4, 1 - 1e-4)
+    return np.c_[emb, np.log(p / (1 - p))]
+
+
+def probs(x, h=None):
+    """(n, len(HEAD_CLASSES)) class probabilities for head inputs x (see features)."""
     h = h or load()
-    a = (np.asarray(emb, np.float32) - h["mu"]) / h["sd"]
+    a = (np.asarray(x, np.float32) - h["mu"]) / h["sd"]
     for i, (w, b) in enumerate(zip(h["W"], h["b"])):
         a = a @ w + b
         if i < len(h["W"]) - 1:
@@ -44,10 +57,13 @@ def probs(emb, h=None):
     return e / e.sum(axis=1, keepdims=True)
 
 
-def category_scores(emb, h=None):
-    """(n_windows, categories, 2) like yamnet.category_scores: the head's probability per
-    category; the veto column is 0 (the head has learnt the look-alikes as "other")."""
-    p = probs(emb, h)
+def category_scores(emb, scores, h=None):
+    """(n_windows, categories, 2) like yamnet.category_scores, from the embeddings and YAMNet's 521
+    scores: the head's probability per category; the veto column is 0 (the head has learnt the
+    look-alikes as "other")."""
+    from classifier import yamnet
+    h = h or load()
+    p = probs(features(emb, yamnet.category_scores(scores)[:, :, 0], h["stack"]), h)
     out = np.zeros((len(p), len(C.ORDER), 2), np.float32)
     out[:, :, 0] = p[:, [C.HEAD_CLASSES.index(c) for c in C.ORDER]]
     return out

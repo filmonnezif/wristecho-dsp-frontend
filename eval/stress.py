@@ -81,7 +81,7 @@ def job(arg):
     yam = any(c == "FIRE_ALARM" for _, c in yamnet.detect(cat, siren_veto=True))
     from classifier import head
     hd = head.available() and any(c == "FIRE_ALARM" for _, c in yamnet.detect(
-        head.category_scores(emb), thresholds=head.load()["thresholds"], siren_veto=True))
+        head.category_scores(emb, scores), thresholds=head.load()["thresholds"], siren_veto=True))
     from eval.evaluate import agreed
     v4_agree = agreed([(t, "FIRE_ALARM") for t in v4], cat, None, C.ORDER.index("FIRE_ALARM"), C.ALARM_AGREE)
     return name, dict(yamnet=yam, head=bool(hd), t3_loose=bool(loose), t3_strict=bool(strict), t3_confirmed=bool(confirmed),
